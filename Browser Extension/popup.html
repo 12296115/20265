@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        University Phishing Detector
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="popup.css"
+    >
+
+</head>
+
+
+<body>
+
+<div class="container">
+
+
+    <!-- =====================================================
+         HEADER
+         ===================================================== -->
+
+    <div class="header">
+
+        <div class="shield">
+            🛡️
+        </div>
+
+        <div class="header-text">
+
+            <h1>
+                Email Security
+            </h1>
+
+            <p>
+                University Phishing Detector
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         ANALYSE BUTTON
+         ===================================================== -->
+
+    <button
+        id="analyseButton"
+        type="button"
+    >
+        Analyse Current Email
+    </button>
+
+
+    <!-- =====================================================
+         LOADING
+         ===================================================== -->
+
+    <div
+        id="loading"
+        class="loading hidden"
+    >
+        <span class="loading-spinner"></span>
+
+        <span>
+            Analysing email...
+        </span>
+
+    </div>
+
+
+    <!-- =====================================================
+         ERROR
+         ===================================================== -->
+
+    <div
+        id="error"
+        class="error hidden"
+    ></div>
+
+
+    <!-- =====================================================
+         RESULT
+         ===================================================== -->
+
+    <div
+        id="result"
+        class="hidden"
+    >
+
+
+        <!-- =================================================
+             PREDICTION
+             ================================================= -->
+
+        <div
+            id="predictionBox"
+            class="prediction-box"
+        >
+
+            <div
+                id="predictionIcon"
+                class="prediction-icon"
+            >
+                ⚠️
+            </div>
+
+
+            <div class="prediction-content">
+
+                <div
+                    id="prediction"
+                    class="prediction-title"
+                >
+                    —
+                </div>
+
+
+                <div
+                    id="confidence"
+                    class="confidence"
+                >
+                    Confidence: —
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             PROBABILITIES
+             ================================================= -->
+
+        <div class="probabilities">
+
+
+            <div class="probability-card">
+
+                <span class="probability-label">
+                    Safe
+                </span>
+
+                <strong
+                    id="safeProbability"
+                    class="safe-value"
+                >
+                    0.00%
+                </strong>
+
+            </div>
+
+
+            <div class="probability-card">
+
+                <span class="probability-label">
+                    Phishing
+                </span>
+
+                <strong
+                    id="phishingProbability"
+                    class="phishing-value"
+                >
+                    0.00%
+                </strong>
+
+            </div>
+
+
+        </div>
+
+
+        <!-- =================================================
+             EMAIL DETAILS
+             ================================================= -->
+
+        <div class="section">
+
+            <h2>
+                Email Details
+            </h2>
+
+
+            <div class="detail-row">
+
+                <span class="detail-label">
+                    Sender
+                </span>
+
+                <span
+                    id="sender"
+                    class="detail-value"
+                >
+                    Not detected
+                </span>
+
+            </div>
+
+
+            <div class="detail-row">
+
+                <span class="detail-label">
+                    Subject
+                </span>
+
+                <span
+                    id="subject"
+                    class="detail-value"
+                >
+                    Not detected
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             EMAIL CHARACTERISTICS
+             
+             Neutral characteristics such as URLs, email
+             addresses and phone numbers are displayed here.
+             
+             These are NOT automatically treated as phishing.
+             ================================================= -->
+
+        <div
+            id="characteristicsSection"
+            class="section hidden"
+        >
+
+            <h2>
+                Email Characteristics
+            </h2>
+
+
+            <div
+                id="characteristics"
+            ></div>
+
+        </div>
+
+
+        <!-- =================================================
+             PHISHING INDICATORS / DETECTION EXPLANATION
+             ================================================= -->
+
+        <div class="section">
+
+            <h2
+                id="indicatorHeading"
+            >
+                Phishing Indicators
+            </h2>
+
+
+            <div
+                id="indicators"
+            ></div>
+
+        </div>
+
+
+        <!-- =================================================
+             DETECTION METHOD
+             ================================================= -->
+
+        <div
+            id="modelExplanation"
+            class="model-explanation"
+        >
+
+            <div class="model-explanation-title">
+                Detection Method
+            </div>
+
+
+            <div class="model-explanation-text">
+
+                DeBERTa-v3-large analyses the email's
+                contextual and semantic patterns.
+                Rule-based indicators provide additional
+                supporting information.
+
+            </div>
+
+        </div>
+
+
+    </div>
+
+
+    <!-- =====================================================
+         FOOTER
+         ===================================================== -->
+
+    <div class="footer">
+
+        <div>
+            Powered by DeBERTa-v3-large
+        </div>
+
+        <div>
+            + SHAP Explainable AI
+        </div>
+
+    </div>
+
+
+</div>
+
+
+<script
+    src="popup.js"
+></script>
+
+
+</body>
+
+</html>
