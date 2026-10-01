@@ -3,6 +3,7 @@ import html
 import json
 import re
 import unicodedata
+from captum.attr import LayerIntegratedGradients
 from lime.lime_text import LimeTextExplainer
 import numpy as np
 import torch
@@ -11,8 +12,12 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 MODEL_DIR = Path(__file__).resolve().parent / "model"
 BATCH_SIZE = 8
-LIME_NUM_SAMPLES = 50
-LIME_NUM_FEATURES = 8
+LIME_NUM_SAMPLES = 150
+IG_N_STEPS = 20
+IG_INTERNAL_BATCH_SIZE = 4
+IG_TOP_WORDS = 10
+# Enough terms that both directions can fill a top-5 list.
+LIME_NUM_FEATURES = 20
 
 MAX_LENGTH = 512
 
@@ -445,6 +450,127 @@ class PhishingPredictor:
         result = self.predict(text)
         result["explanation"] = self.explain(text)
         return result
+
+    def _log_odds_forward(self, input_ids, attention_mask, nlp_features):
+        logits = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            nlp_features=nlp_features,
+        )
+        return logits[:, 1] - logits[:, 0]
+
+    def deep_explain(self, text):
+        cleaned = self._clean_or_raise(text)
+
+        features = np.asarray(
+            [extract_nlp_features(cleaned)], dtype=np.float32
+        )
+        normalised = torch.tensor(
+            (features - self.mean) / self.std, dtype=torch.float32
+        )
+        tokens = self.tokenizer(
+            cleaned,
+            return_tensors="pt",
+            truncation=True,
+            max_length=MAX_LENGTH,
+            return_offsets_mapping=True,
+        )
+        input_ids = tokens["input_ids"]
+        attention_mask = tokens["attention_mask"]
+
+        special_ids = torch.tensor(self.tokenizer.all_special_ids)
+        is_special = torch.isin(input_ids, special_ids)
+        baseline_ids = torch.where(
+            is_special,
+            input_ids,
+            torch.full_like(input_ids, self.tokenizer.pad_token_id),
+        )
+
+        ig = LayerIntegratedGradients(
+            self._log_odds_forward,
+            self.model.transformer.get_input_embeddings(),
+        )
+        attributions, delta = ig.attribute(
+            inputs=input_ids,
+            baselines=baseline_ids,
+            additional_forward_args=(attention_mask, normalised),
+            n_steps=IG_N_STEPS,
+            internal_batch_size=IG_INTERNAL_BATCH_SIZE,
+            return_convergence_delta=True,
+        )
+        token_scores = attributions.sum(dim=-1)[0].detach().numpy()
+
+        with torch.no_grad():
+            f_input = float(
+                self._log_odds_forward(input_ids, attention_mask, normalised)[0]
+            )
+            f_baseline = float(
+                self._log_odds_forward(baseline_ids, attention_mask, normalised)[0]
+            )
+
+        delta = float(delta[0])
+        gap = abs(f_input - f_baseline)
+        words = self._merge_token_scores(
+            cleaned,
+            tokens.word_ids(0),
+            tokens["offset_mapping"][0].tolist(),
+            is_special[0].tolist(),
+            token_scores,
+        )
+        words.sort(key=lambda item: abs(item["score"]), reverse=True)
+
+        return {
+            "method": "Integrated Gradients",
+            "target": "phishing_log_odds",
+            "weight_label": "log-odds attribution",
+            "words": words[:IG_TOP_WORDS],
+            "convergence_delta": round(delta, 6),
+            "f_input": round(f_input, 6),
+            "f_baseline": round(f_baseline, 6),
+            "relative_delta": (
+                round(abs(delta) / gap, 6) if gap > 1e-9 else None
+            ),
+            "n_steps": IG_N_STEPS,
+            "num_tokens": int(input_ids.shape[1]),
+            "truncated": bool(
+                input_ids.shape[1] >= MAX_LENGTH
+            ),
+        }
+
+    @staticmethod
+    def _merge_token_scores(text, word_ids, offsets, is_special, scores):
+        # Sub-word pieces of one word are summed; punctuation-only tokens are
+        # skipped and also end the current word (so URLs split like LIME's).
+        words = []
+        current = None
+        previous_word_id = None
+
+        for word_id, (start, end), special, score in zip(
+            word_ids, offsets, is_special, scores
+        ):
+            piece = text[start:end]
+            if special or word_id is None or not any(
+                char.isalnum() for char in piece
+            ):
+                current = None
+                previous_word_id = word_id
+                continue
+
+            if current is None or word_id != previous_word_id:
+                current = {"start": start, "end": end, "score": 0.0}
+                words.append(current)
+
+            current["end"] = end
+            current["score"] += float(score)
+            previous_word_id = word_id
+
+        return [
+            {
+                "word": text[item["start"]:item["end"]].strip(),
+                "score": round(item["score"], 6),
+            }
+            for item in words
+        ]
     # def predict_with_explanation(self, text, max_words=30, top_k=5):
     #     cleaned = preprocess_email(text)
     #     baseline = self.predict(cleaned)

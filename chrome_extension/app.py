@@ -50,6 +50,13 @@ def explain():
     )
 
 
+@app.post("/api/deep-explain")
+def deep_explain():
+    return run_on_request_text(
+        lambda text: {"deep_explanation": predictor.deep_explain(text)}
+    )
+
+
 @app.post("/api/analyse")
 def analyse():
     return run_on_request_text(predictor.predict_with_explanation)

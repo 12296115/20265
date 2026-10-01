@@ -3,9 +3,19 @@
   "name": "Email Detector",
   "version": "0.1.0",
   "description": "Analyse an open Gmail email for phishing and show a model explanation.",
+  "icons": {
+    "16": "icons/email-check-16.png",
+    "32": "icons/email-check-32.png",
+    "48": "icons/email-check-48.png",
+    "128": "icons/email-check-128.png"
+  },
   "action": {
     "default_title": "Analyse email",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/email-check-16.png",
+      "32": "icons/email-check-32.png"
+    }
   },
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [

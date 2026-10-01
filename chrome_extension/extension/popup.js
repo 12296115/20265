@@ -4,6 +4,8 @@ const API_BASE = "http://127.0.0.1:5000/api";
 const MAX_CHARS = 30000;
 const TIMEOUT_MS = 10 * 60 * 1000; // Per request; LIME is slow on a laptop CPU.
 const MIN_RELATIVE_WEIGHT = 0.05;
+const TOP_TERMS = 5;
+const NO_DRIVER_THRESHOLD = 0.1; // log-odds
 
 const ui = {
   read: document.getElementById("read-email"),
@@ -21,19 +23,41 @@ const ui = {
   featureRows: document.getElementById("feature-rows"),
   explanation: document.getElementById("explanation"),
   note: document.getElementById("explanation-note"),
-  terms: document.getElementById("terms"),
+  fitBadge: document.getElementById("fit-badge"),
+  noDriver: document.getElementById("no-driver"),
+  termLists: document.getElementById("term-lists"),
+  termsPhishing: document.getElementById("terms-phishing"),
+  termsLegitimate: document.getElementById("terms-legitimate"),
+  deep: document.getElementById("deep"),
+  deepButton: document.getElementById("deep-explain"),
+  igBadge: document.getElementById("ig-badge"),
+  igNote: document.getElementById("ig-note"),
+  igLists: document.getElementById("ig-lists"),
+  igPhishing: document.getElementById("ig-phishing"),
+  igLegitimate: document.getElementById("ig-legitimate"),
 };
+
+// Text that produced the current verdict; never persisted.
+let analysedText = null;
+let busy = false;
+let lastResult = null;
 
 function setStatus(message, kind = "") {
   ui.status.textContent = message;
   ui.status.className = `status ${kind}`.trim();
 }
 
-function setBusy(busy, label = "Analysing…") {
-  ui.read.disabled = busy;
-  ui.clear.disabled = busy;
-  ui.analyse.disabled = busy;
-  ui.analyse.textContent = busy ? label : "Analyse email";
+function setBusy(isBusy, label = "Analysing…") {
+  busy = isBusy;
+  ui.read.disabled = isBusy;
+  ui.clear.disabled = isBusy;
+  ui.analyse.disabled = isBusy;
+  ui.analyse.textContent = isBusy ? label : "Analyse email";
+  updateDeepButton();
+}
+
+function updateDeepButton() {
+  ui.deepButton.disabled = busy || analysedText === null;
 }
 
 function clearResult() {
@@ -42,14 +66,31 @@ function clearResult() {
   ui.explanation.hidden = true;
   ui.gateRows.replaceChildren();
   ui.featureRows.replaceChildren();
-  ui.terms.replaceChildren();
+  resetExplanation();
+  ui.deep.hidden = true;
+  resetDeepExplanation();
+  analysedText = null;
+  updateDeepButton();
 }
 
-// Keeps saturated probabilities (e.g. 99.9996%) distinguishable from 100%.
+function resetDeepExplanation() {
+  ui.igBadge.hidden = true;
+  ui.igNote.textContent = "";
+  ui.igLists.hidden = true;
+  ui.igPhishing.replaceChildren();
+  ui.igLegitimate.replaceChildren();
+}
+
+function resetExplanation() {
+  ui.fitBadge.hidden = true;
+  ui.noDriver.hidden = true;
+  ui.termLists.hidden = true;
+  ui.termsPhishing.replaceChildren();
+  ui.termsLegitimate.replaceChildren();
+}
+
 function formatPercent(p) {
-  const value = Number(p) * 100;
-  const decimals = value >= 99.9 || value <= 0.1 ? 4 : 1;
-  return `${value.toFixed(decimals)}%`;
+  return `${(Number(p) * 100).toFixed(2)}%`;
 }
 
 function formatSigned(value, decimals = 2) {
@@ -160,21 +201,11 @@ function showVerdict(data) {
     ? "Potential phishing"
     : "Predicted legitimate";
   ui.verdict.className = `verdict ${data.verdict}`;
-  ui.score.textContent = formatPercent(data.score);
-}
 
-function describeChange(label, fromProb, toProb) {
-  const deltaPoints = (toProb - fromProb) * 100;
-  const range = `(${formatPercent(fromProb)} → ${formatPercent(toProb)})`;
-
-  if (Math.abs(deltaPoints) < 0.01) {
-    return `${label} changed the phishing probability by less than 0.01 percentage points ${range}.`;
-  }
-  const direction = deltaPoints > 0 ? "raised" : "lowered";
-  return (
-    `${label} ${direction} the phishing probability by ` +
-    `${Math.abs(deltaPoints).toFixed(2)} percentage points ${range}.`
-  );
+  const phishingProb = Number(data.class_scores?.[1]);
+  ui.score.textContent = Number.isFinite(phishingProb)
+    ? formatPercent(phishingProb)
+    : "–";
 }
 
 function showGate(gate) {
@@ -208,21 +239,22 @@ function showGate(gate) {
       ]))
   );
 
-  const lines = [
-    describeChange(
-      "Adding the feature branch to the text branch",
-      Number(probs.text_only),
-      Number(probs.combined),
-    ),
-  ];
-  if (Number.isFinite(Number(probs.features_at_training_mean))) {
-    lines.push(describeChange(
-      "Using this email's 12 feature values instead of the training averages",
-      Number(probs.features_at_training_mean),
-      Number(probs.combined),
-    ));
+  const combined = Number(logOdds.combined);
+  const textOnly = Number(logOdds.text_only);
+  const atMean = Number(logOdds.features_at_training_mean);
+
+  if ([combined, textOnly, atMean].every(Number.isFinite)) {
+    const offset = textOnly - combined;
+    ui.gateSummary.textContent =
+      "The feature branch acts as a fixed offset: it " +
+      `${offset >= 0 ? "lowers" : "raises"} the score by ${Math.abs(offset).toFixed(2)} log-odds ` +
+      `(text only minus combined = ${formatSigned(offset)}). ` +
+      "This email's own feature values changed the score by " +
+      `only ${formatSigned(combined - atMean, 3)} log-odds ` +
+      `(combined ${combined.toFixed(2)} vs. features at training mean ${atMean.toFixed(2)}).`;
+  } else {
+    ui.gateSummary.textContent = "";
   }
-  ui.gateSummary.textContent = lines.join(" ");
 
   ui.featureRows.replaceChildren(
     ...(gate.features || []).map(feature =>
@@ -231,14 +263,41 @@ function showGate(gate) {
   );
 }
 
+function showFitBadge(r2) {
+  if (!Number.isFinite(r2)) return;
+  const [label, kind] =
+    r2 >= 0.5 ? ["Good fit", "good"]
+    : r2 >= 0.2 ? ["Weak fit", "weak"]
+    : ["Unreliable", "unreliable"];
+  ui.fitBadge.textContent = `${label} (R² ${r2.toFixed(2)})`;
+  ui.fitBadge.className = `badge ${kind}`;
+  ui.fitBadge.title = "R² of LIME's local linear fit to the model's log-odds.";
+  ui.fitBadge.hidden = false;
+}
+
+function fillTermList(list, terms, strongest) {
+  if (!terms.length) {
+    const item = document.createElement("li");
+    item.className = "empty";
+    item.textContent = "No notable terms.";
+    list.append(item);
+    return;
+  }
+  for (const term of terms) {
+    list.append(termRow(term, strongest));
+  }
+}
+
 function showExplanation(explanation) {
   ui.explanation.hidden = false;
-  ui.terms.replaceChildren();
+  resetExplanation();
 
   if (explanation?.method !== "LIME" || !Array.isArray(explanation.terms)) {
     ui.note.textContent = "A LIME explanation was not returned.";
     return;
   }
+
+  showFitBadge(Number(explanation.local_fit_r2));
 
   const terms = explanation.terms
     .map(term => ({ word: term.word, weight: Number(term.weight) }))
@@ -248,47 +307,94 @@ function showExplanation(explanation) {
   const shown = strongest > 0
     ? terms.filter(term => Math.abs(term.weight) >= MIN_RELATIVE_WEIGHT * strongest)
     : [];
-  const hidden = terms.length - shown.length;
+  const byStrength = (a, b) => Math.abs(b.weight) - Math.abs(a.weight);
+  const towardsPhishing = shown.filter(t => t.weight > 0).sort(byStrength).slice(0, TOP_TERMS);
+  const towardsLegitimate = shown.filter(t => t.weight < 0).sort(byStrength).slice(0, TOP_TERMS);
 
   ui.note.textContent =
     `LIME (${explanation.num_samples} samples). Values are each word's ` +
     `${explanation.weight_label || "log-odds contribution"} to the phishing score, not percentages. ` +
-    "Red bars push towards phishing, green towards legitimate. " +
-    "Bars are scaled to the strongest term" +
-    (hidden > 0 ? `; ${hidden} term(s) under 5% of it are hidden.` : ".");
+    `Top ${TOP_TERMS} per direction; bars are scaled to the strongest term and terms under 5% of it are hidden.`;
 
-  if (!shown.length) {
-    const item = document.createElement("li");
-    item.textContent = "No influential terms were returned for this message.";
-    ui.terms.append(item);
+  ui.noDriver.hidden = strongest > NO_DRIVER_THRESHOLD;
+  ui.termLists.hidden = false;
+  fillTermList(ui.termsPhishing, towardsPhishing, strongest);
+  fillTermList(ui.termsLegitimate, towardsLegitimate, strongest);
+}
+
+function showIgBadge(relativeDelta) {
+  const rel = relativeDelta === null ? NaN : Number(relativeDelta);
+  const [label, kind] =
+    !Number.isFinite(rel) || rel > 0.6 ? ["Unreliable", "unreliable"]
+    : rel >= 0.1 ? ["Use with caution", "weak"]
+    : ["Reliable", "good"];
+  ui.igBadge.textContent = Number.isFinite(rel)
+    ? `${label} (Δ ${(rel * 100).toFixed(0)}%)`
+    : label;
+  ui.igBadge.className = `badge ${kind}`;
+  ui.igBadge.title =
+    "Relative convergence delta: |delta| / |F(input) − F(baseline)|. Lower is better.";
+  ui.igBadge.hidden = false;
+}
+
+function showDeepExplanation(deep) {
+  ui.deep.hidden = false;
+  resetDeepExplanation();
+
+  if (deep?.method !== "Integrated Gradients" || !Array.isArray(deep.words)) {
+    ui.igNote.textContent = "An Integrated Gradients result was not returned.";
     return;
   }
 
-  for (const term of shown) {
-    const direction = term.weight >= 0 ? "toward-phishing" : "toward-legitimate";
+  showIgBadge(deep.relative_delta);
 
-    const row = document.createElement("li");
-    row.className = "bar-row";
+  const words = deep.words
+    .map(item => ({ word: item.word, weight: Number(item.score) }))
+    .filter(item => typeof item.word === "string" && Number.isFinite(item.weight));
+  const strongest = Math.max(0, ...words.map(item => Math.abs(item.weight)));
+  const byStrength = (a, b) => Math.abs(b.weight) - Math.abs(a.weight);
 
-    const word = document.createElement("span");
-    word.className = "term";
-    word.textContent = term.word;
-    word.title = term.word;
+  ui.igNote.textContent =
+    `Integrated Gradients (${deep.n_steps} steps, ${deep.num_tokens} tokens). ` +
+    `Values are each word's ${deep.weight_label || "log-odds attribution"} to the phishing score; ` +
+    "bars are scaled to the strongest word. " +
+    "IG is less stable on long emails for this model, so check the badge before relying on it." +
+    (deep.truncated ? " Only the first 512 tokens were analysed." : "");
 
-    const track = document.createElement("div");
-    track.className = "bar-track";
-    const fill = document.createElement("div");
-    fill.className = `bar-fill ${direction}`;
-    fill.style.width = `${(Math.abs(term.weight) / strongest) * 100}%`;
-    track.append(fill);
-
-    const value = document.createElement("span");
-    value.className = `bar-value ${direction}`;
-    value.textContent = formatSigned(term.weight, 3);
-
-    row.append(word, track, value);
-    ui.terms.append(row);
+  ui.igLists.hidden = false;
+  if (strongest > 0) {
+    fillTermList(ui.igPhishing, words.filter(w => w.weight > 0).sort(byStrength), strongest);
+    fillTermList(ui.igLegitimate, words.filter(w => w.weight < 0).sort(byStrength), strongest);
+  } else {
+    fillTermList(ui.igPhishing, [], 1);
+    fillTermList(ui.igLegitimate, [], 1);
   }
+}
+
+function termRow(term, strongest) {
+  const direction = term.weight >= 0 ? "toward-phishing" : "toward-legitimate";
+
+  const row = document.createElement("li");
+  row.className = "bar-row";
+
+  const word = document.createElement("span");
+  word.className = "term";
+  word.textContent = term.word;
+  word.title = term.word;
+
+  const track = document.createElement("div");
+  track.className = "bar-track";
+  const fill = document.createElement("div");
+  fill.className = `bar-fill ${direction}`;
+  fill.style.width = `${(Math.abs(term.weight) / strongest) * 100}%`;
+  track.append(fill);
+
+  const value = document.createElement("span");
+  value.className = `bar-value ${direction}`;
+  value.textContent = formatSigned(term.weight, 3);
+
+  row.append(word, track, value);
+  return row;
 }
 
 async function postJson(path, text) {
@@ -328,11 +434,13 @@ function describeError(error, fallback) {
 // in-memory and cleared when the browser closes.
 const STORAGE_KEY = "lastResult";
 
-function saveResult(result) {
-  return chrome.storage.session.set({ [STORAGE_KEY]: result });
+function saveResult(patch) {
+  lastResult = { ...(lastResult || {}), ...patch, savedAt: Date.now() };
+  return chrome.storage.session.set({ [STORAGE_KEY]: lastResult });
 }
 
 function forgetResult() {
+  lastResult = null;
   return chrome.storage.session.remove(STORAGE_KEY);
 }
 
@@ -346,6 +454,7 @@ async function restoreLastResult() {
   } catch {
     return;
   }
+  lastResult = last;
 
   const time = new Date(last.savedAt).toLocaleTimeString();
   if (last.explanation) {
@@ -356,6 +465,14 @@ async function restoreLastResult() {
     ui.note.textContent =
       "The LIME explanation did not finish (the popup was closed). Analyse again to compute it.";
     setStatus(`Showing the last verdict from ${time}.`);
+  }
+
+  if (last.deepExplanation) {
+    showDeepExplanation(last.deepExplanation);
+  } else {
+    ui.deep.hidden = false;
+    ui.igNote.textContent =
+      "The email text is not stored, so analyse the email again to run the deep explanation.";
   }
 }
 
@@ -385,7 +502,9 @@ ui.analyse.addEventListener("click", async () => {
       prediction = await postJson("predict", text);
       showVerdict(prediction);
       showGate(prediction.gate_analysis);
-      await saveResult({ prediction, savedAt: Date.now() });
+      analysedText = text;
+      ui.deep.hidden = false;
+      await saveResult({ prediction });
     } catch (error) {
       setStatus(describeError(error, "Analysis failed."), "error");
       return;
@@ -399,12 +518,33 @@ ui.analyse.addEventListener("click", async () => {
     try {
       const data = await postJson("explain", text);
       showExplanation(data.explanation);
-      await saveResult({ prediction, explanation: data.explanation, savedAt: Date.now() });
+      await saveResult({ explanation: data.explanation });
       setStatus("Analysis complete.", "success");
     } catch (error) {
       ui.note.textContent = "The LIME explanation could not be computed.";
       setStatus(describeError(error, "Explanation failed."), "error");
     }
+  } finally {
+    setBusy(false);
+  }
+});
+
+ui.deepButton.addEventListener("click", async () => {
+  if (analysedText === null) return;
+
+  setBusy(true, "Explaining…");
+  resetDeepExplanation();
+  ui.igNote.textContent = "Running… this can take 1–3 minutes on CPU";
+  setStatus("Running Integrated Gradients…");
+
+  try {
+    const data = await postJson("deep-explain", analysedText);
+    showDeepExplanation(data.deep_explanation);
+    await saveResult({ deepExplanation: data.deep_explanation });
+    setStatus("Deep explanation complete.", "success");
+  } catch (error) {
+    ui.igNote.textContent = "The deep explanation could not be computed.";
+    setStatus(describeError(error, "Deep explanation failed."), "error");
   } finally {
     setBusy(false);
   }
