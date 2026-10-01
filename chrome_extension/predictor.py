@@ -13,7 +13,13 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 MODEL_DIR = Path(__file__).resolve().parent / "model"
 BATCH_SIZE = 8
 LIME_NUM_SAMPLES = 150
-IG_N_STEPS = 20
+# Retry with more steps while relative delta exceeds the target.
+IG_STEP_SCHEDULE = (20, 100)
+# IG only: keeps long emails within a few minutes. Verdict, gate and LIME use MAX_LENGTH.
+IG_MAX_LENGTH = 256
+IG_TARGET_RELATIVE_DELTA = 0.10
+# pad gave F(baseline) closest to 0 among pad/mask/unk (all still ~+4 to +6).
+IG_BASELINE = "pad"
 IG_INTERNAL_BATCH_SIZE = 4
 IG_TOP_WORDS = 10
 # Enough terms that both directions can fill a top-5 list.
@@ -472,33 +478,25 @@ class PhishingPredictor:
             cleaned,
             return_tensors="pt",
             truncation=True,
-            max_length=MAX_LENGTH,
+            max_length=IG_MAX_LENGTH,
             return_offsets_mapping=True,
         )
         input_ids = tokens["input_ids"]
         attention_mask = tokens["attention_mask"]
+        truncated = (
+            len(self.tokenizer(cleaned)["input_ids"]) > IG_MAX_LENGTH
+        )
 
         special_ids = torch.tensor(self.tokenizer.all_special_ids)
         is_special = torch.isin(input_ids, special_ids)
+        baseline_token_id = getattr(
+            self.tokenizer, f"{IG_BASELINE}_token_id"
+        )
         baseline_ids = torch.where(
             is_special,
             input_ids,
-            torch.full_like(input_ids, self.tokenizer.pad_token_id),
+            torch.full_like(input_ids, baseline_token_id),
         )
-
-        ig = LayerIntegratedGradients(
-            self._log_odds_forward,
-            self.model.transformer.get_input_embeddings(),
-        )
-        attributions, delta = ig.attribute(
-            inputs=input_ids,
-            baselines=baseline_ids,
-            additional_forward_args=(attention_mask, normalised),
-            n_steps=IG_N_STEPS,
-            internal_batch_size=IG_INTERNAL_BATCH_SIZE,
-            return_convergence_delta=True,
-        )
-        token_scores = attributions.sum(dim=-1)[0].detach().numpy()
 
         with torch.no_grad():
             f_input = float(
@@ -507,9 +505,30 @@ class PhishingPredictor:
             f_baseline = float(
                 self._log_odds_forward(baseline_ids, attention_mask, normalised)[0]
             )
-
-        delta = float(delta[0])
         gap = abs(f_input - f_baseline)
+
+        ig = LayerIntegratedGradients(
+            self._log_odds_forward,
+            self.model.transformer.get_input_embeddings(),
+        )
+        for n_steps in IG_STEP_SCHEDULE:
+            attributions, delta = ig.attribute(
+                inputs=input_ids,
+                baselines=baseline_ids,
+                additional_forward_args=(attention_mask, normalised),
+                n_steps=n_steps,
+                internal_batch_size=IG_INTERNAL_BATCH_SIZE,
+                return_convergence_delta=True,
+            )
+            delta = float(delta[0])
+            relative_delta = abs(delta) / gap if gap > 1e-9 else None
+            if (
+                relative_delta is not None
+                and relative_delta <= IG_TARGET_RELATIVE_DELTA
+            ):
+                break
+
+        token_scores = attributions.sum(dim=-1)[0].detach().numpy()
         words = self._merge_token_scores(
             cleaned,
             tokens.word_ids(0),
@@ -528,13 +547,13 @@ class PhishingPredictor:
             "f_input": round(f_input, 6),
             "f_baseline": round(f_baseline, 6),
             "relative_delta": (
-                round(abs(delta) / gap, 6) if gap > 1e-9 else None
+                round(relative_delta, 6) if relative_delta is not None else None
             ),
-            "n_steps": IG_N_STEPS,
+            "baseline": IG_BASELINE,
+            "n_steps": n_steps,
             "num_tokens": int(input_ids.shape[1]),
-            "truncated": bool(
-                input_ids.shape[1] >= MAX_LENGTH
-            ),
+            "truncated": truncated,
+            "max_tokens": IG_MAX_LENGTH,
         }
 
     @staticmethod

@@ -32,6 +32,8 @@ const ui = {
   deepButton: document.getElementById("deep-explain"),
   igBadge: document.getElementById("ig-badge"),
   igNote: document.getElementById("ig-note"),
+  igDetails: document.getElementById("ig-details"),
+  igTruncated: document.getElementById("ig-truncated"),
   igLists: document.getElementById("ig-lists"),
   igPhishing: document.getElementById("ig-phishing"),
   igLegitimate: document.getElementById("ig-legitimate"),
@@ -75,6 +77,8 @@ function clearResult() {
 
 function resetDeepExplanation() {
   ui.igBadge.hidden = true;
+  ui.igDetails.hidden = true;
+  ui.igTruncated.hidden = true;
   ui.igNote.textContent = "";
   ui.igLists.hidden = true;
   ui.igPhishing.replaceChildren();
@@ -354,12 +358,23 @@ function showDeepExplanation(deep) {
   const strongest = Math.max(0, ...words.map(item => Math.abs(item.weight)));
   const byStrength = (a, b) => Math.abs(b.weight) - Math.abs(a.weight);
 
+  const fInput = Number(deep.f_input);
+  const fBaseline = Number(deep.f_baseline);
+  if (Number.isFinite(fInput) && Number.isFinite(fBaseline)) {
+    ui.igDetails.textContent =
+      `F(input) ${fInput.toFixed(2)} · F(baseline) ${fBaseline.toFixed(2)} log-odds · ` +
+      `baseline: ${deep.baseline || "pad"} tokens · ${deep.n_steps} steps`;
+    ui.igDetails.hidden = false;
+  }
+
   ui.igNote.textContent =
-    `Integrated Gradients (${deep.n_steps} steps, ${deep.num_tokens} tokens). ` +
-    `Values are each word's ${deep.weight_label || "log-odds attribution"} to the phishing score; ` +
-    "bars are scaled to the strongest word. " +
-    "IG is less stable on long emails for this model, so check the badge before relying on it." +
-    (deep.truncated ? " Only the first 512 tokens were analysed." : "");
+    "The badge checks whether the word scores add up to the model's output. " +
+    "If it says Unreliable, treat the words as rough hints only.";
+
+  if (deep.truncated) {
+    ui.igTruncated.textContent = `Explained the first ${deep.max_tokens || 256} tokens only`;
+    ui.igTruncated.hidden = false;
+  }
 
   ui.igLists.hidden = false;
   if (strongest > 0) {
@@ -534,7 +549,7 @@ ui.deepButton.addEventListener("click", async () => {
 
   setBusy(true, "Explaining…");
   resetDeepExplanation();
-  ui.igNote.textContent = "Running… this can take 1–3 minutes on CPU";
+  ui.igNote.textContent = "This can take up to 5 minutes on CPU.";
   setStatus("Running Integrated Gradients…");
 
   try {
