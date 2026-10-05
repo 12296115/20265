@@ -11,7 +11,7 @@ The system also returns a confidence score and a LIME explanation showing which 
 
 This implementation forms the backend and browser-integration components of the university capstone project.
 
----
+
 
 ## 2. Main Features
 
@@ -29,7 +29,7 @@ The implemented system provides the following functions:
 - Provides Gmail and manual-text analysis through a Chrome extension
 - Keeps model processing on the local computer
 
----
+
 
 ## 3. Backend Architecture
 
