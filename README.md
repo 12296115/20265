@@ -51,4 +51,29 @@ The backend follows this processing sequence:
 The saved model is loaded once when the Flask application starts. This prevents the large model from being loaded again for every API request.
 
 ---
+## 4. Main Project Files
+
+```text
+phishing-project/
+├── README.md
+├── requirements.txt
+├── app.py
+├── predictor.py
+├── check_model.py
+├── model/
+│   ├── config.json
+│   ├── model_config.json
+│   ├── pytorch_model.bin
+│   ├── tokenizer.json
+│   ├── tokenizer_config.json
+│   ├── feature_mean.npy
+│   ├── feature_std.npy
+│   ├── feature_names.json
+│   └── test_results.json
+└── chrome_extension/
+    ├── manifest.json
+    ├── popup.html
+    ├── popup.js
+    └── icons/
+
 
