@@ -2,31 +2,16 @@
 // UNIVERSITY PHISHING EMAIL DETECTOR
 // popup.js
 //
-// DeBERTa-v3-large + 12 NLP features + gated fusion
-// + SHAP Explainable AI
+// DeBERTa-v3-large + 12 engineered NLP features + gated fusion
 //
-// The DeBERTa model is the primary classifier.
-// Rule-based indicators are supplementary explanations.
+// IMPORTANT:
 //
-// UI behaviour:
-//
-// 1. Safe + no indicators
-//       -> Phishing Indicators
-//       -> "No common phishing indicators detected"
-//
-// 2. Safe + characteristics
-//       -> Email Characteristics
-//       -> Phishing Indicators
-//
-// 3. Phishing + rule indicators
-//       -> Phishing Indicators
-//
-// 4. Phishing + no rule indicators
-//       -> Detection Explanation
-//       -> Model-based fallback message
-//
-// A phishing prediction MUST NEVER display the green
-// "No common phishing indicators detected" message.
+// 1. DeBERTa-v3-large is the primary classifier.
+// 2. Rule-based indicators are supplementary explanations.
+// 3. Indicators do NOT override or determine the prediction.
+// 4. Every phishing prediction receives at least one
+//    human-readable phishing indicator.
+// 5. SHAP is NOT executed from this popup.
 // ============================================================
 
 
@@ -88,6 +73,7 @@ async function analyseCurrentEmail() {
 
     hideError();
 
+
     if (result) {
 
         result.classList.add(
@@ -116,9 +102,9 @@ async function analyseCurrentEmail() {
 
     try {
 
-        // ========================================================
+        // ====================================================
         // GET ACTIVE BROWSER TAB
-        // ========================================================
+        // ====================================================
 
         const tabs =
             await chrome.tabs.query({
@@ -146,9 +132,9 @@ async function analyseCurrentEmail() {
         }
 
 
-        // ========================================================
+        // ====================================================
         // GET EMAIL FROM content.js
-        // ========================================================
+        // ====================================================
 
         const email =
             await chrome.tabs.sendMessage(
@@ -186,9 +172,9 @@ async function analyseCurrentEmail() {
         }
 
 
-        // ========================================================
+        // ====================================================
         // SEND EMAIL TO FASTAPI
-        // ========================================================
+        // ====================================================
 
         const response =
             await fetch(
@@ -226,13 +212,11 @@ async function analyseCurrentEmail() {
             );
 
 
-        // ========================================================
+        // ====================================================
         // HTTP ERROR
-        // ========================================================
+        // ====================================================
 
-        if (
-            !response.ok
-        ) {
+        if (!response.ok) {
 
             let errorMessage =
                 "API request failed. Make sure api.py is running.";
@@ -244,21 +228,19 @@ async function analyseCurrentEmail() {
                     await response.json();
 
 
-                if (
-                    errorData &&
-                    errorData.error
-                ) {
+                errorMessage =
 
-                    errorMessage =
-                        errorData.error;
+                    errorData?.error ||
 
-                }
+                    errorData?.message ||
+
+                    errorData?.detail ||
+
+                    errorMessage;
 
             }
 
-            catch (
-                ignored
-            ) {
+            catch (ignored) {
 
                 // Keep default error message.
 
@@ -272,9 +254,9 @@ async function analyseCurrentEmail() {
         }
 
 
-        // ========================================================
+        // ====================================================
         // READ API RESPONSE
-        // ========================================================
+        // ====================================================
 
         const data =
             await response.json();
@@ -287,14 +269,14 @@ async function analyseCurrentEmail() {
 
 
         if (
-            data.success === false
+            data?.success === false
         ) {
 
             throw new Error(
 
-                data.error ||
+                data?.error ||
 
-                data.message ||
+                data?.message ||
 
                 "The API could not analyse this email."
 
@@ -303,9 +285,9 @@ async function analyseCurrentEmail() {
         }
 
 
-        // ========================================================
+        // ====================================================
         // DISPLAY RESULT
-        // ========================================================
+        // ====================================================
 
         displayResult(
             data,
@@ -315,9 +297,7 @@ async function analyseCurrentEmail() {
     }
 
 
-    catch (
-        error
-    ) {
+    catch (error) {
 
         console.error(
             "Email analysis error:",
@@ -411,14 +391,12 @@ function displayResult(
 
     const prediction =
         String(
-            data.prediction ||
+            data?.prediction ||
             "Unknown"
         ).trim();
 
 
-    if (
-        predictionElement
-    ) {
+    if (predictionElement) {
 
         predictionElement.textContent =
             prediction;
@@ -430,15 +408,39 @@ function displayResult(
     // CONFIDENCE
     // ========================================================
 
-    const confidence =
+    let confidence =
         getNumericValue(
-            data.confidence_percentage
+            data?.confidence_percentage
         );
 
 
     if (
-        confidenceElement
+        !Number.isFinite(
+            confidence
+        )
     ) {
+
+        confidence =
+            getNumericValue(
+                data?.confidence
+            );
+
+
+        if (
+            Number.isFinite(
+                confidence
+            ) &&
+            confidence <= 1
+        ) {
+
+            confidence *= 100;
+
+        }
+
+    }
+
+
+    if (confidenceElement) {
 
         if (
             Number.isFinite(
@@ -462,12 +464,10 @@ function displayResult(
 
 
     // ========================================================
-    // PREDICTION BOX STYLE
+    // RESET PREDICTION STYLE
     // ========================================================
 
-    if (
-        predictionBox
-    ) {
+    if (predictionBox) {
 
         predictionBox.classList.remove(
 
@@ -480,9 +480,7 @@ function displayResult(
     }
 
 
-    if (
-        predictionIcon
-    ) {
+    if (predictionIcon) {
 
         predictionIcon.textContent =
             "";
@@ -490,14 +488,16 @@ function displayResult(
     }
 
 
+    // ========================================================
+    // PHISHING / SAFE STYLE
+    // ========================================================
+
     if (
         prediction ===
         "Phishing Email"
     ) {
 
-        if (
-            predictionBox
-        ) {
+        if (predictionBox) {
 
             predictionBox.classList.add(
                 "prediction-phishing"
@@ -506,9 +506,7 @@ function displayResult(
         }
 
 
-        if (
-            predictionIcon
-        ) {
+        if (predictionIcon) {
 
             predictionIcon.textContent =
                 "⚠️";
@@ -519,9 +517,7 @@ function displayResult(
 
     else {
 
-        if (
-            predictionBox
-        ) {
+        if (predictionBox) {
 
             predictionBox.classList.add(
                 "prediction-safe"
@@ -530,9 +526,7 @@ function displayResult(
         }
 
 
-        if (
-            predictionIcon
-        ) {
+        if (predictionIcon) {
 
             predictionIcon.textContent =
                 "✅";
@@ -543,7 +537,7 @@ function displayResult(
 
 
     // ========================================================
-    // PROBABILITIES
+    // RESULT SECTIONS
     // ========================================================
 
     displayProbabilities(
@@ -551,30 +545,19 @@ function displayResult(
     );
 
 
-    // ========================================================
-    // EMAIL DETAILS
-    // ========================================================
-
     displayEmailDetails(
         email
     );
 
-
-    // ========================================================
-    // EMAIL CHARACTERISTICS
-    // ========================================================
 
     displayEmailCharacteristics(
         email
     );
 
 
-    // ========================================================
-    // INDICATORS / DETECTION EXPLANATION
-    // ========================================================
-
     displayIndicators(
-        data
+        data,
+        email
     );
 
 }
@@ -582,17 +565,6 @@ function displayResult(
 
 // ============================================================
 // DISPLAY PROBABILITIES
-//
-// The displayed percentages are normalised so:
-//
-// Safe + Phishing = exactly 100.00%
-//
-// This prevents cases such as:
-//
-// Safe      99.98%
-// Phishing   2.00%
-//
-// which incorrectly total 101.98% due to rounding.
 // ============================================================
 
 function displayProbabilities(
@@ -613,18 +585,18 @@ function displayProbabilities(
 
     let safePercentage =
         getNumericValue(
-            data.safe_probability_percentage
+            data?.safe_probability_percentage
         );
 
 
     let phishingPercentage =
         getNumericValue(
-            data.phishing_probability_percentage
+            data?.phishing_probability_percentage
         );
 
 
     // ========================================================
-    // FALLBACK: CALCULATE FROM RAW PROBABILITIES
+    // FALLBACK: RAW SAFE PROBABILITY
     // ========================================================
 
     if (
@@ -635,7 +607,7 @@ function displayProbabilities(
 
         const rawSafe =
             getNumericValue(
-                data.safe_probability
+                data?.safe_probability
             );
 
 
@@ -646,14 +618,21 @@ function displayProbabilities(
         ) {
 
             safePercentage =
+
                 rawSafe <= 1
+
                     ? rawSafe * 100
+
                     : rawSafe;
 
         }
 
     }
 
+
+    // ========================================================
+    // FALLBACK: RAW PHISHING PROBABILITY
+    // ========================================================
 
     if (
         !Number.isFinite(
@@ -663,7 +642,7 @@ function displayProbabilities(
 
         const rawPhishing =
             getNumericValue(
-                data.phishing_probability
+                data?.phishing_probability
             );
 
 
@@ -674,8 +653,11 @@ function displayProbabilities(
         ) {
 
             phishingPercentage =
+
                 rawPhishing <= 1
+
                     ? rawPhishing * 100
+
                     : rawPhishing;
 
         }
@@ -684,7 +666,7 @@ function displayProbabilities(
 
 
     // ========================================================
-    // NORMALISE
+    // NORMALISE DISPLAY VALUES
     // ========================================================
 
     if (
@@ -701,11 +683,6 @@ function displayProbabilities(
             );
 
 
-        // ----------------------------------------------------
-        // Use Safe as the primary displayed value.
-        // Calculate Phishing as the exact remainder.
-        // ----------------------------------------------------
-
         safePercentage =
             Number(
                 safePercentage.toFixed(2)
@@ -721,6 +698,7 @@ function displayProbabilities(
             );
 
     }
+
 
     else if (
         Number.isFinite(
@@ -757,27 +735,17 @@ function displayProbabilities(
     // DISPLAY SAFE
     // ========================================================
 
-    if (
-        safeElement
-    ) {
+    if (safeElement) {
 
-        if (
+        safeElement.textContent =
+
             Number.isFinite(
                 safePercentage
             )
-        ) {
 
-            safeElement.textContent =
-                `${safePercentage.toFixed(2)}%`;
+                ? `${safePercentage.toFixed(2)}%`
 
-        }
-
-        else {
-
-            safeElement.textContent =
-                "Unavailable";
-
-        }
+                : "Unavailable";
 
     }
 
@@ -786,27 +754,17 @@ function displayProbabilities(
     // DISPLAY PHISHING
     // ========================================================
 
-    if (
-        phishingElement
-    ) {
+    if (phishingElement) {
 
-        if (
+        phishingElement.textContent =
+
             Number.isFinite(
                 phishingPercentage
             )
-        ) {
 
-            phishingElement.textContent =
-                `${phishingPercentage.toFixed(2)}%`;
+                ? `${phishingPercentage.toFixed(2)}%`
 
-        }
-
-        else {
-
-            phishingElement.textContent =
-                "Unavailable";
-
-        }
+                : "Unavailable";
 
     }
 
@@ -833,23 +791,23 @@ function displayEmailDetails(
         );
 
 
-    if (
-        senderElement
-    ) {
+    if (senderElement) {
 
         senderElement.textContent =
-            email.sender ||
+
+            email?.sender ||
+
             "Not detected";
 
     }
 
 
-    if (
-        subjectElement
-    ) {
+    if (subjectElement) {
 
         subjectElement.textContent =
-            email.subject ||
+
+            email?.subject ||
+
             "Not detected";
 
     }
@@ -860,18 +818,10 @@ function displayEmailDetails(
 // ============================================================
 // EMAIL CHARACTERISTICS
 //
-// These are intentionally NEUTRAL characteristics.
+// These are NEUTRAL characteristics.
 //
-// A URL, email address or phone number is not automatically
-// treated as a phishing indicator.
-//
-// Example:
-//
-// Email Characteristics
-// 🔗 URL or link present
-// ✉️ Email address present
-//
-// These are separate from actual phishing indicators.
+// URLs, email addresses, phone numbers and punctuation are
+// not automatically considered phishing.
 // ============================================================
 
 function displayEmailCharacteristics(
@@ -904,29 +854,13 @@ function displayEmailCharacteristics(
         "";
 
 
-    const body =
-        String(
-            email?.body ||
-            ""
-        );
-
-
-    const sender =
-        String(
-            email?.sender ||
-            ""
-        );
-
-
-    const subject =
-        String(
-            email?.subject ||
-            ""
-        );
-
-
     const completeText =
-        `${sender} ${subject} ${body}`;
+
+        `${email?.sender || ""} ` +
+
+        `${email?.subject || ""} ` +
+
+        `${email?.body || ""}`;
 
 
     const characteristics =
@@ -939,7 +873,9 @@ function displayEmailCharacteristics(
 
     const urlMatches =
         completeText.match(
+
             /(?:https?:\/\/|www\.)[^\s<>"']+/gi
+
         );
 
 
@@ -954,7 +890,10 @@ function displayEmailCharacteristics(
                 "🔗",
 
             text:
-                `${urlMatches.length} URL/link${urlMatches.length === 1 ? "" : "s"} present`
+
+                `${urlMatches.length} URL/link` +
+
+                `${urlMatches.length === 1 ? "" : "s"} present`
 
         });
 
@@ -984,7 +923,10 @@ function displayEmailCharacteristics(
                 "✉️",
 
             text:
-                `${emailMatches.length} email address${emailMatches.length === 1 ? "" : "es"} present`
+
+                `${emailMatches.length} email address` +
+
+                `${emailMatches.length === 1 ? "" : "es"} present`
 
         });
 
@@ -1014,7 +956,10 @@ function displayEmailCharacteristics(
                 "📞",
 
             text:
-                `${phoneMatches.length} phone number${phoneMatches.length === 1 ? "" : "s"} present`
+
+                `${phoneMatches.length} phone number` +
+
+                `${phoneMatches.length === 1 ? "" : "s"} present`
 
         });
 
@@ -1023,9 +968,6 @@ function displayEmailCharacteristics(
 
     // ========================================================
     // EXCLAMATION MARKS
-    //
-    // This is a neutral characteristic, not automatically
-    // a phishing indicator.
     // ========================================================
 
     const exclamationCount =
@@ -1047,7 +989,10 @@ function displayEmailCharacteristics(
                 "❗",
 
             text:
-                `${exclamationCount} exclamation mark${exclamationCount === 1 ? "" : "s"} present`
+
+                `${exclamationCount} exclamation mark` +
+
+                `${exclamationCount === 1 ? "" : "s"} present`
 
         });
 
@@ -1055,7 +1000,40 @@ function displayEmailCharacteristics(
 
 
     // ========================================================
-    // IF NOTHING TO DISPLAY
+    // QUESTION MARKS
+    // ========================================================
+
+    const questionCount =
+        (
+            completeText.match(
+                /\?/g
+            ) ||
+            []
+        ).length;
+
+
+    if (
+        questionCount > 0
+    ) {
+
+        characteristics.push({
+
+            icon:
+                "❓",
+
+            text:
+
+                `${questionCount} question mark` +
+
+                `${questionCount === 1 ? "" : "s"} present`
+
+        });
+
+    }
+
+
+    // ========================================================
+    // NOTHING TO DISPLAY
     // ========================================================
 
     if (
@@ -1066,16 +1044,18 @@ function displayEmailCharacteristics(
             "hidden"
         );
 
+
         return;
 
     }
 
 
     // ========================================================
-    // CREATE CHARACTERISTIC ITEMS
+    // DISPLAY CHARACTERISTICS
     // ========================================================
 
     characteristics.forEach(
+
         function (
             characteristic
         ) {
@@ -1091,7 +1071,10 @@ function displayEmailCharacteristics(
 
 
             div.textContent =
-                `${characteristic.icon} ${characteristic.text}`;
+
+                `${characteristic.icon} ` +
+
+                `${characteristic.text}`;
 
 
             container.appendChild(
@@ -1099,6 +1082,7 @@ function displayEmailCharacteristics(
             );
 
         }
+
     );
 
 
@@ -1110,29 +1094,601 @@ function displayEmailCharacteristics(
 
 
 // ============================================================
-// DISPLAY INDICATORS
+// GET API PHISHING INDICATORS
+// ============================================================
+
+function getApiIndicators(
+    data
+) {
+
+    let indicators =
+        [];
+
+
+    // ========================================================
+    // PRIMARY API FIELD
+    // ========================================================
+
+    if (
+        Array.isArray(
+            data?.indicators
+        )
+    ) {
+
+        indicators =
+            data.indicators;
+
+    }
+
+
+    // ========================================================
+    // FALLBACK API FIELD
+    // ========================================================
+
+    if (
+        indicators.length === 0 &&
+        Array.isArray(
+            data?.rule_based_indicators
+        )
+    ) {
+
+        indicators =
+            data.rule_based_indicators;
+
+    }
+
+
+    // ========================================================
+    // CLEAN VALUES
+    // ========================================================
+
+    indicators =
+        indicators
+
+            .filter(
+
+                function (
+                    indicator
+                ) {
+
+                    return (
+
+                        indicator !== null &&
+
+                        indicator !== undefined &&
+
+                        String(
+                            indicator
+                        ).trim() !== ""
+
+                    );
+
+                }
+
+            )
+
+            .map(
+
+                function (
+                    indicator
+                ) {
+
+                    return String(
+                        indicator
+                    ).trim();
+
+                }
+
+            );
+
+
+    return removeDuplicateIndicators(
+        indicators
+    );
+
+}
+
+
+// ============================================================
+// DETECT SUPPLEMENTARY PHISHING INDICATORS
 //
-// IMPORTANT:
+// These provide human-readable descriptions of suspicious
+// patterns present in the email.
 //
-// This is the key UI logic.
-//
-// PHISHING + INDICATORS:
-//     Heading = "Phishing Indicators"
-//
-// PHISHING + NO INDICATORS:
-//     Heading = "Detection Explanation"
-//
-// SAFE + NO INDICATORS:
-//     Heading = "Phishing Indicators"
-//     Green confirmation message
-//
-// Therefore a phishing prediction can NEVER display:
-//
-//     ✅ No common phishing indicators detected
+// They do NOT make or override the model prediction.
+// ============================================================
+
+function detectPhishingIndicators(
+    email
+) {
+
+    const sender =
+        String(
+            email?.sender || ""
+        );
+
+
+    const subject =
+        String(
+            email?.subject || ""
+        );
+
+
+    const body =
+        String(
+            email?.body || ""
+        );
+
+
+    const text =
+        `${subject} ${body}`;
+
+
+    const lowerText =
+        text.toLowerCase();
+
+
+    const indicators =
+        [];
+
+
+    // ========================================================
+    // 1. URGENCY / PRESSURE
+    // ========================================================
+
+    const urgencyPattern =
+        /\b(urgent|urgently|immediately|immediate|act now|action required|action needed|as soon as possible|asap|within 24 hours|within 48 hours|within one hour|deadline|expires|expired|expiring|final warning|final notice|last chance|limited time|time sensitive|do not delay|respond immediately|attention required|important notice|take action|quickly|hurry)\b/i;
+
+
+    if (
+        urgencyPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Urgency or pressure language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 2. CREDENTIAL / LOGIN / ACCOUNT VERIFICATION
+    // ========================================================
+
+    const credentialPattern =
+        /\b(password|passcode|login|log in|signin|sign in|username|credential|credentials|authentication|authenticate|verification code|security code|verify your account|verify account|account verification|confirm your account|confirm account|update your account|update account|security verification|identity verification|validate your account|validate account|reactivate your account|reactivate account)\b/i;
+
+
+    if (
+        credentialPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Credential or account-verification language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 3. THREAT / NEGATIVE CONSEQUENCE
+    // ========================================================
+
+    const threatPattern =
+        /\b(account.{0,30}(closed|locked|suspended|disabled|terminated|restricted)|suspend(ed|ing)?|deactivat(e|ed|ion)|terminat(e|ed|ion)|legal action|penalty|access.{0,20}(blocked|revoked|removed|restricted)|security breach|unauthori[sz]ed access|compromised account|failure to respond|fail to respond|service interruption|lose access|account restriction|account closure)\b/i;
+
+
+    if (
+        threatPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Threat or negative-consequence language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 4. FINANCIAL / PAYMENT
+    // ========================================================
+
+    const financialPattern =
+        /\b(payment|invoice|billing|bill|bank|banking|credit card|debit card|card details|refund|transaction|transfer|wire transfer|outstanding balance|amount due|overdue|pay now|payment required|payment failed|financial|tax refund|tax payment|prize money|cash|debt|loan|mortgage|investment|crypto|cryptocurrency|bitcoin|wallet|funds|deposit|withdrawal)\b/i;
+
+
+    if (
+        financialPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Financial or payment-related language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 5. CALL-TO-ACTION
+    // ========================================================
+
+    const ctaPattern =
+        /\b(click here|click below|click the link|click on the link|follow the link|open the link|visit the link|verify now|confirm now|sign in now|login now|log in now|update now|download now|download the attachment|open attachment|open the attachment|view attachment|view the attachment|reply now|respond now|claim now|apply now|complete verification|continue here|access now|review now|check now|register now|submit now|activate now|renew now|unsubscribe here)\b/i;
+
+
+    if (
+        ctaPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Suspicious call-to-action language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 6. URL + ACTION LANGUAGE
+    //
+    // URL alone remains a neutral characteristic.
+    // ========================================================
+
+    const containsUrl =
+        /(?:https?:\/\/|www\.)[^\s<>"']+/i.test(
+            text
+        );
+
+
+    const actionLanguagePattern =
+        /\b(click|visit|open|follow|verify|confirm|login|log in|sign in|update|access|review|continue|download|activate|claim|register|submit|check)\b/i;
+
+
+    if (
+        containsUrl &&
+        actionLanguagePattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Action-oriented message contains an external link"
+        );
+
+    }
+
+
+    // ========================================================
+    // 7. SENSITIVE INFORMATION REQUEST
+    // ========================================================
+
+    const sensitivePattern =
+        /\b(card number|credit card number|debit card number|bank details|bank account|account number|routing number|security code|cvv|cvc|pin number|pin code|social security|social security number|personal information|personal details|date of birth|identity verification|verification details|security answer|security question)\b/i;
+
+
+    if (
+        sensitivePattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Request for sensitive or financial information detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 8. REWARD / PRIZE / ENTICEMENT
+    // ========================================================
+
+    const rewardPattern =
+        /\b(congratulations|winner|you have won|you've won|selected to receive|selected to win|claim your|claim prize|free gift|free prize|exclusive reward|special offer|limited offer|guaranteed|bonus|free money|cash prize|reward waiting|gift card|lottery|jackpot|sweepstakes|lucky winner)\b/i;
+
+
+    if (
+        rewardPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Reward, prize, or strong enticement language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 9. UNSOLICITED / SUSPICIOUS PROMOTION
+    // ========================================================
+
+    const promotionPattern =
+        /\b(unsolicited|advertiser|advertisement|promotional email|promotional offer|remove from this advertiser|future mailings|mailing list|adult site|adult content|sex site|special promotion|exclusive deal|exclusive offer|marketing offer|free offer)\b/i;
+
+
+    if (
+        promotionPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Unsolicited or suspicious promotional language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 10. ATTACHMENT-RELATED ACTION
+    // ========================================================
+
+    const attachmentPattern =
+        /\b(attachment|attached file|attached document|attached invoice|attached receipt|attached form|attached statement)\b/i;
+
+
+    const attachmentActionPattern =
+        /\b(open|download|review|view|enable|complete|sign|fill|read|check)\b/i;
+
+
+    if (
+        attachmentPattern.test(
+            lowerText
+        ) &&
+        attachmentActionPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Message encourages interaction with an attachment"
+        );
+
+    }
+
+
+    // ========================================================
+    // 11. SECURITY ALERT / ACCOUNT PROBLEM
+    // ========================================================
+
+    const securityAlertPattern =
+        /\b(security alert|security warning|security notice|unusual activity|suspicious activity|unusual login|suspicious login|login attempt|sign-in attempt|account compromised|account security|security issue|security problem|security incident|account alert)\b/i;
+
+
+    if (
+        securityAlertPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Security-alert or account-problem language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 12. DELIVERY / PARCEL / SHIPPING
+    // ========================================================
+
+    const deliveryPattern =
+        /\b(parcel|package|delivery|shipment|shipping|courier|delivery attempt|missed delivery|tracking number|shipping fee|delivery fee|reschedule delivery|package waiting|parcel waiting)\b/i;
+
+
+    if (
+        deliveryPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Delivery or parcel-related lure detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 13. EMPLOYMENT / RECRUITMENT LURE
+    // ========================================================
+
+    const employmentPattern =
+        /\b(job offer|employment offer|work from home|remote job|remote position|job opportunity|career opportunity|hiring|recruitment|recruiter|salary offer|weekly income|earn money|easy income|part.time job)\b/i;
+
+
+    if (
+        employmentPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Employment or income-related lure detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 14. CHARITY / DONATION
+    // ========================================================
+
+    const charityPattern =
+        /\b(donation|donate now|charity|charitable|fundraising|fundraiser|humanitarian aid|financial assistance|support our cause)\b/i;
+
+
+    if (
+        charityPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Donation or charity-related solicitation detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 15. SUBSCRIPTION / ACCOUNT RENEWAL
+    // ========================================================
+
+    const renewalPattern =
+        /\b(subscription|membership|renewal|renew your|subscription expired|membership expired|automatic renewal|renew now|service renewal)\b/i;
+
+
+    if (
+        renewalPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Subscription or account-renewal language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 16. IMPERSONATION / AUTHORITY LANGUAGE
+    // ========================================================
+
+    const authorityPattern =
+        /\b(IT department|IT support|administrator|system administrator|security team|support team|help desk|helpdesk|account team|compliance team|payroll department|human resources|HR department|bank security|customer support)\b/i;
+
+
+    if (
+        authorityPattern.test(
+            text
+        )
+    ) {
+
+        indicators.push(
+            "Authority or trusted-service impersonation language detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 17. PAYMENT / INVOICE + ACTION
+    // ========================================================
+
+    const invoicePattern =
+        /\b(invoice|payment|receipt|billing|statement|amount due|outstanding balance)\b/i;
+
+
+    if (
+        invoicePattern.test(
+            lowerText
+        ) &&
+        (
+            actionLanguagePattern.test(
+                lowerText
+            ) ||
+            attachmentPattern.test(
+                lowerText
+            )
+        )
+    ) {
+
+        indicators.push(
+            "Financial lure combined with a requested action detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 18. PASSWORD / ACCOUNT + URGENCY
+    // ========================================================
+
+    if (
+        credentialPattern.test(
+            lowerText
+        ) &&
+        urgencyPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Urgent account or credential request detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 19. THREAT + ACTION REQUEST
+    // ========================================================
+
+    if (
+        threatPattern.test(
+            lowerText
+        ) &&
+        actionLanguagePattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Threatening language combined with a requested action detected"
+        );
+
+    }
+
+
+    // ========================================================
+    // 20. LINK + ACCOUNT LANGUAGE
+    // ========================================================
+
+    if (
+        containsUrl &&
+        credentialPattern.test(
+            lowerText
+        )
+    ) {
+
+        indicators.push(
+            "Account-related request includes an external link"
+        );
+
+    }
+
+
+    // ========================================================
+    // REMOVE DUPLICATES
+    // ========================================================
+
+    return removeDuplicateIndicators(
+        indicators
+    );
+
+}
+
+
+// ============================================================
+// DISPLAY PHISHING INDICATORS
 // ============================================================
 
 function displayIndicators(
-    data
+    data,
+    email
 ) {
 
     const heading =
@@ -1147,11 +1703,21 @@ function displayIndicators(
         );
 
 
-    if (
-        !container
-    ) {
+    if (!container) {
 
         return;
+
+    }
+
+
+    // ========================================================
+    // ALWAYS KEEP THIS HEADING
+    // ========================================================
+
+    if (heading) {
+
+        heading.textContent =
+            "Phishing Indicators";
 
     }
 
@@ -1165,13 +1731,12 @@ function displayIndicators(
 
 
     // ========================================================
-    // GET PREDICTION
+    // PREDICTION
     // ========================================================
 
     const prediction =
         String(
-            data?.prediction ||
-            ""
+            data?.prediction || ""
         ).trim();
 
 
@@ -1181,204 +1746,81 @@ function displayIndicators(
 
 
     // ========================================================
-    // GET INDICATORS FROM API
+    // API INDICATORS
     // ========================================================
 
-    let indicators =
-        [];
-
-
-    if (
-        Array.isArray(
-            data?.indicators
-        )
-    ) {
-
-        indicators =
-            data.indicators
-                .filter(
-                    function (
-                        indicator
-                    ) {
-
-                        return (
-
-                            indicator !==
-                            null &&
-
-                            indicator !==
-                            undefined &&
-
-                            String(
-                                indicator
-                            ).trim() !== ""
-
-                        );
-
-                    }
-                )
-                .map(
-                    function (
-                        indicator
-                    ) {
-
-                        return String(
-                            indicator
-                        ).trim();
-
-                    }
-                );
-
-    }
+    const apiIndicators =
+        getApiIndicators(
+            data
+        );
 
 
     // ========================================================
-    // FALLBACK API FIELD
-    //
-    // Supports a revised API response using
-    // rule_based_indicators.
+    // SUPPLEMENTARY INDICATORS
     // ========================================================
 
-    if (
-        indicators.length === 0
-        &&
-        Array.isArray(
-            data?.rule_based_indicators
-        )
-    ) {
-
-        indicators =
-            data.rule_based_indicators
-                .filter(
-                    function (
-                        indicator
-                    ) {
-
-                        return (
-
-                            indicator !==
-                            null &&
-
-                            indicator !==
-                            undefined &&
-
-                            String(
-                                indicator
-                            ).trim() !== ""
-
-                        );
-
-                    }
-                )
-                .map(
-                    function (
-                        indicator
-                    ) {
-
-                        return String(
-                            indicator
-                        ).trim();
-
-                    }
-                );
-
-    }
-
-
-    // ========================================================
-    // REMOVE DUPLICATES
-    // ========================================================
-
-    indicators =
-        [
-            ...new Set(
-                indicators
-            )
-        ];
+    const detectedIndicators =
+        detectPhishingIndicators(
+            email
+        );
 
 
     // ========================================================
     // PHISHING EMAIL
     // ========================================================
 
-    if (
-        isPhishing
-    ) {
+    if (isPhishing) {
 
         // ----------------------------------------------------
-        // CASE 1:
-        // Actual rule-based indicators exist.
+        // COMBINE API + LOCAL EXPLANATORY INDICATORS
         // ----------------------------------------------------
 
-        if (
-            indicators.length > 0
-        ) {
+        let indicators =
+            removeDuplicateIndicators([
 
-            if (
-                heading
+                ...apiIndicators,
+
+                ...detectedIndicators
+
+            ]);
+
+
+        // ----------------------------------------------------
+        // DISPLAY SPECIFIC INDICATORS
+        // ----------------------------------------------------
+
+        indicators.forEach(
+
+            function (
+                indicator
             ) {
 
-                heading.textContent =
-                    "Phishing Indicators";
+                addIndicator(
+                    container,
+                    indicator
+                );
 
             }
 
-
-            indicators.forEach(
-                function (
-                    indicator
-                ) {
-
-                    addIndicator(
-                        container,
-                        indicator
-                    );
-
-                }
-            );
-
-
-            return;
-
-        }
+        );
 
 
         // ----------------------------------------------------
-        // CASE 2:
-        // DeBERTa detected phishing but no predefined
-        // rule-based indicator matched.
+        // ALWAYS DISPLAY MODEL-BASED INDICATOR
+        //
+        // This means EVERY phishing prediction has an
+        // explanation even if no predefined pattern matches.
+        //
+        // This does not claim that a keyword caused the
+        // prediction. It accurately identifies that the
+        // classifier found contextual/semantic evidence.
         // ----------------------------------------------------
 
-        if (
-            heading
-        ) {
-
-            heading.textContent =
-                "Detection Explanation";
-
-        }
-
-
-        const modelExplanation =
-            data?.indicator_message &&
-            String(
-                data.indicator_message
-            ).trim() !== ""
-
-                ? String(
-                    data.indicator_message
-                ).trim()
-
-                :
-
-                "The model detected phishing based on contextual and semantic patterns. No predefined rule-based indicators matched this message.";
-
-
-        addModelDetectionExplanation(
+        addIndicator(
 
             container,
 
-            modelExplanation
+            "Contextual and semantic phishing patterns detected by the NLP model"
 
         );
 
@@ -1390,27 +1832,19 @@ function displayIndicators(
 
     // ========================================================
     // SAFE EMAIL
+    //
+    // Do not turn local keyword matches into phishing warnings
+    // when the model predicted Safe.
+    //
+    // Only explicit API indicators are shown.
     // ========================================================
 
     if (
-        heading
+        apiIndicators.length > 0
     ) {
 
-        heading.textContent =
-            "Phishing Indicators";
+        apiIndicators.forEach(
 
-    }
-
-
-    // --------------------------------------------------------
-    // Safe email with rule-based indicators
-    // --------------------------------------------------------
-
-    if (
-        indicators.length > 0
-    ) {
-
-        indicators.forEach(
             function (
                 indicator
             ) {
@@ -1421,6 +1855,7 @@ function displayIndicators(
                 );
 
             }
+
         );
 
 
@@ -1429,11 +1864,9 @@ function displayIndicators(
     }
 
 
-    // --------------------------------------------------------
-    // Safe email with no indicators
-    //
-    // ONLY HERE do we show the green confirmation.
-    // --------------------------------------------------------
+    // ========================================================
+    // SAFE + NO INDICATORS
+    // ========================================================
 
     const noIndicators =
         document.createElement(
@@ -1457,7 +1890,81 @@ function displayIndicators(
 
 
 // ============================================================
-// ADD STANDARD PHISHING INDICATOR
+// REMOVE DUPLICATE INDICATORS
+// ============================================================
+
+function removeDuplicateIndicators(
+    indicators
+) {
+
+    const seen =
+        new Set();
+
+
+    const result =
+        [];
+
+
+    indicators.forEach(
+
+        function (
+            indicator
+        ) {
+
+            const cleaned =
+                String(
+                    indicator || ""
+                )
+                    .replace(
+                        /^⚠️\s*/,
+                        ""
+                    )
+                    .trim();
+
+
+            if (!cleaned) {
+
+                return;
+
+            }
+
+
+            const key =
+                cleaned.toLowerCase();
+
+
+            if (
+                seen.has(
+                    key
+                )
+            ) {
+
+                return;
+
+            }
+
+
+            seen.add(
+                key
+            );
+
+
+            result.push(
+                cleaned
+            );
+
+        }
+
+    );
+
+
+    return result;
+
+}
+
+
+// ============================================================
+// ADD PHISHING INDICATOR
 // ============================================================
 
 function addIndicator(
@@ -1478,57 +1985,16 @@ function addIndicator(
     const text =
         String(
             indicator
-        ).trim();
-
-
-    // Avoid duplicate warning icons.
-    if (
-        text.startsWith(
-            "⚠️"
         )
-    ) {
-
-        div.textContent =
-            text;
-
-    }
-
-    else {
-
-        div.textContent =
-            `⚠️ ${text}`;
-
-    }
-
-
-    container.appendChild(
-        div
-    );
-
-}
-
-
-// ============================================================
-// ADD MODEL-BASED DETECTION EXPLANATION
-// ============================================================
-
-function addModelDetectionExplanation(
-    container,
-    message
-) {
-
-    const div =
-        document.createElement(
-            "div"
-        );
-
-
-    div.className =
-        "model-detection";
+            .replace(
+                /^⚠️\s*/,
+                ""
+            )
+            .trim();
 
 
     div.textContent =
-        `⚠️ ${message}`;
+        `⚠️ ${text}`;
 
 
     container.appendChild(
@@ -1547,12 +2013,9 @@ function getNumericValue(
 ) {
 
     if (
-        value ===
-        null ||
-        value ===
-        undefined ||
-        value ===
-        ""
+        value === null ||
+        value === undefined ||
+        value === ""
     ) {
 
         return NaN;
@@ -1569,7 +2032,9 @@ function getNumericValue(
     return Number.isFinite(
         number
     )
+
         ? number
+
         : NaN;
 
 }
@@ -1607,9 +2072,7 @@ function showError(
     message
 ) {
 
-    if (
-        !errorBox
-    ) {
+    if (!errorBox) {
 
         return;
 
@@ -1633,9 +2096,7 @@ function showError(
 
 function hideError() {
 
-    if (
-        !errorBox
-    ) {
+    if (!errorBox) {
 
         return;
 

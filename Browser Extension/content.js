@@ -1,46 +1,114 @@
+// ============================================================
 // University Phishing Email Detector
-// Revised content.js
+// content.js
+//
+// Supports:
+//   1. Webmail-style evaluation page
+//   2. Original dataset test page
+//   3. Browser-extension popup communication
+//   4. Direct in-page scanning
+//   5. FastAPI prediction
+//   6. SHAP explanations
+//
+// IMPORTANT:
+// The browser extension does NOT run the ML model.
+// Classification and SHAP remain in the FastAPI backend.
+// ============================================================
+
+
+// ============================================================
+// API CONFIGURATION
+// ============================================================
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 const PREDICT_URL = `${API_BASE_URL}/predict`;
 const EXPLAIN_URL = `${API_BASE_URL}/explain`;
 
+
+// ============================================================
+// ELEMENT IDS
+// ============================================================
+
 const BUTTON_ID = "university-phishing-scan-button";
 const RESULT_ID = "university-phishing-result";
 const ERROR_ID = "university-phishing-error";
+
+
+// ============================================================
+// INITIALISATION
+// ============================================================
 
 if (!window.__universityPhishingDetectorLoaded) {
     window.__universityPhishingDetectorLoaded = true;
     initialiseDetector();
 }
 
+
 function initialiseDetector() {
-    if (!isDatasetTestEnvironment()) return;
+
+    // Only inject the page button into the controlled
+    // local evaluation environment.
+    if (!isDatasetTestEnvironment()) {
+        return;
+    }
 
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", createScanButton);
+        document.addEventListener(
+            "DOMContentLoaded",
+            createScanButton
+        );
     } else {
         createScanButton();
     }
 }
 
+
+// ============================================================
+// CONTROLLED TEST ENVIRONMENT DETECTION
+// ============================================================
+
 function isDatasetTestEnvironment() {
+
     const local =
         location.hostname === "localhost" ||
         location.hostname === "127.0.0.1";
 
-    if (!local) return false;
+    if (!local) {
+        return false;
+    }
 
+    // New webmail evaluation page.
+    const webmailPage =
+        document.getElementById("mailList") &&
+        document.getElementById("subjectTitle") &&
+        document.getElementById("from") &&
+        document.getElementById("body");
+
+    if (webmailPage) {
+        return true;
+    }
+
+    // Original dataset test page.
     return [...document.querySelectorAll("h1,h2,h3")]
-        .some(el =>
-            normaliseText(el.textContent).toLowerCase() === "university email"
+        .some(element =>
+            normaliseText(element.textContent)
+                .toLowerCase() === "university email"
         );
 }
 
+
+// ============================================================
+// CREATE FLOATING SCAN BUTTON
+// ============================================================
+
 function createScanButton() {
-    if (document.getElementById(BUTTON_ID)) return;
+
+    if (document.getElementById(BUTTON_ID)) {
+        return;
+    }
 
     const button = document.createElement("button");
+
     button.id = BUTTON_ID;
     button.textContent = "🛡️ Scan Email for Phishing";
 
@@ -61,73 +129,283 @@ function createScanButton() {
         boxShadow: "0 3px 10px rgba(0,0,0,.2)"
     });
 
-    button.addEventListener("click", analyseCurrentEmail);
+    button.addEventListener(
+        "click",
+        analyseCurrentEmail
+    );
+
     document.body.appendChild(button);
 }
 
+
+// ============================================================
+// ANALYSE CURRENT EMAIL
+// ============================================================
+
 async function analyseCurrentEmail() {
-    const button = document.getElementById(BUTTON_ID);
+
+    const button =
+        document.getElementById(BUTTON_ID);
 
     try {
-        setButtonLoading(button, true, "⏳ Analysing Email...");
-        removeElement(ERROR_ID);
 
+        setButtonLoading(
+            button,
+            true,
+            "⏳ Analysing Email..."
+        );
+
+        removeElement(ERROR_ID);
+        removeElement(RESULT_ID);
+
+        // Extract the currently displayed email.
         const email = extractEmail();
 
-        if (!email.body || !email.body.trim()) {
-            throw new Error("Could not detect the selected email body.");
+        console.log(
+            "========== IN-PAGE EMAIL =========="
+        );
+
+        console.log(
+            "Sender:",
+            email.sender
+        );
+
+        console.log(
+            "Subject:",
+            email.subject
+        );
+
+        console.log(
+            "Body length:",
+            email.body
+                ? email.body.length
+                : 0
+        );
+
+        console.log(
+            "Body:",
+            email.body
+        );
+
+        console.log(
+            "==================================="
+        );
+
+        if (
+            !email.body ||
+            !email.body.trim()
+        ) {
+            throw new Error(
+                "Could not detect the selected email body."
+            );
         }
 
-        const response = await fetch(PREDICT_URL, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                sender: email.sender || "",
-                subject: email.subject || "",
-                body: email.body
-            })
-        });
+        // Send exactly sender + subject + body to FastAPI.
+        const payload = {
+            sender: email.sender || "",
+            subject: email.subject || "",
+            body: email.body || ""
+        };
+
+        console.log(
+            "[Phishing Detector] Prediction payload:",
+            payload
+        );
+
+        const response = await fetch(
+            PREDICT_URL,
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify(payload)
+            }
+        );
 
         if (!response.ok) {
+
             throw new Error(
                 await readApiError(response) ||
                 "Prediction API request failed. Make sure api.py is running."
             );
         }
 
-        displayResult(await response.json(), email);
+        const data =
+            await response.json();
+
+        // Debugging:
+        // These RAW probabilities should be identical to
+        // those returned to popup.js for the same email.
+        console.log(
+            "========== IN-PAGE API RESULT =========="
+        );
+
+        console.log(
+            "Prediction:",
+            data.prediction
+        );
+
+        console.log(
+            "Confidence raw:",
+            data.confidence
+        );
+
+        console.log(
+            "Safe probability raw:",
+            data.safe_probability
+        );
+
+        console.log(
+            "Phishing probability raw:",
+            data.phishing_probability
+        );
+
+        console.log(
+            "========================================"
+        );
+
+        displayResult(
+            data,
+            email
+        );
 
     } catch (error) {
-        console.error(error);
-        showError(error.message || "Unable to analyse this email.");
+
+        console.error(
+            "[Phishing Detector]",
+            error
+        );
+
+        showError(
+            error.message ||
+            "Unable to analyse this email."
+        );
+
     } finally {
-        setButtonLoading(button, false);
+
+        setButtonLoading(
+            button,
+            false
+        );
     }
 }
 
-function setButtonLoading(button, loading, text = "") {
-    if (!button) return;
+
+// ============================================================
+// BUTTON LOADING STATE
+// ============================================================
+
+function setButtonLoading(
+    button,
+    loading,
+    text = ""
+) {
+
+    if (!button) {
+        return;
+    }
 
     button.disabled = loading;
-    button.textContent = loading
-        ? text
-        : "🛡️ Scan Email for Phishing";
 
-    button.style.background = loading
-        ? "#6b7280"
-        : "#2563eb";
+    button.textContent =
+        loading
+            ? text
+            : "🛡️ Scan Email for Phishing";
 
-    button.style.cursor = loading
-        ? "wait"
-        : "pointer";
+    button.style.background =
+        loading
+            ? "#6b7280"
+            : "#2563eb";
+
+    button.style.cursor =
+        loading
+            ? "wait"
+            : "pointer";
 }
 
+
+// ============================================================
+// EMAIL EXTRACTION
+// ============================================================
+
 function extractEmail() {
-    const card = getVisibleEmailCard();
+
+    // ========================================================
+    // METHOD 1:
+    // WEBMAIL EVALUATION PAGE
+    // ========================================================
+
+    const webmailFrom =
+        document.getElementById("from");
+
+    const webmailSubject =
+        document.getElementById(
+            "subjectTitle"
+        );
+
+    const webmailBody =
+        document.getElementById("body");
+
+    if (
+        webmailFrom &&
+        webmailSubject &&
+        webmailBody &&
+        isVisible(webmailBody)
+    ) {
+
+        const sender =
+            normaliseText(
+                webmailFrom.textContent || ""
+            );
+
+        const subject =
+            normaliseText(
+                webmailSubject.textContent || ""
+            );
+
+        const body =
+            cleanEmailBody(
+                webmailBody.innerText ||
+                webmailBody.textContent ||
+                ""
+            );
+
+        if (body) {
+
+            console.log(
+                "[Phishing Detector] Webmail email detected.",
+                {
+                    sender,
+                    subject,
+                    bodyLength: body.length
+                }
+            );
+
+            return {
+                sender,
+                subject,
+                body
+            };
+        }
+    }
+
+    // ========================================================
+    // METHOD 2:
+    // ORIGINAL DATASET TEST PAGE
+    // ========================================================
+
+    const card =
+        getVisibleEmailCard();
 
     if (!card) {
+
+        console.warn(
+            "[Phishing Detector] No supported email container detected."
+        );
+
         return {
             sender: "",
             subject: "",
@@ -135,29 +413,75 @@ function extractEmail() {
         };
     }
 
-    return {
-        sender: extractLabelValue(card, "From:"),
-        subject: extractLabelValue(card, "Subject:"),
-        body: cleanEmailBody(
+    const sender =
+        extractLabelValue(
+            card,
+            "From:"
+        );
+
+    const subject =
+        extractLabelValue(
+            card,
+            "Subject:"
+        );
+
+    const body =
+        cleanEmailBody(
             extractBodyFromCard(card)
-        )
+        );
+
+    console.log(
+        "[Phishing Detector] Dataset email detected.",
+        {
+            sender,
+            subject,
+            bodyLength: body.length
+        }
+    );
+
+    return {
+        sender,
+        subject,
+        body
     };
 }
 
+
+// ============================================================
+// ORIGINAL DATASET EMAIL CARD DETECTION
+// ============================================================
+
 function getVisibleEmailCard() {
-    const heading = [...document.querySelectorAll("h1,h2,h3")]
-        .find(el =>
-            isVisible(el) &&
-            normaliseText(el.textContent).toLowerCase() ===
-            "university email"
-        );
 
-    if (!heading) return null;
+    const heading =
+        [...document.querySelectorAll(
+            "h1,h2,h3"
+        )]
+            .find(element =>
+                isVisible(element) &&
+                normaliseText(
+                    element.textContent
+                ).toLowerCase() ===
+                    "university email"
+            );
 
-    let element = heading.parentElement;
+    if (!heading) {
+        return null;
+    }
 
-    for (let i = 0; i < 8 && element; i++) {
-        const text = normaliseText(element.innerText);
+    let element =
+        heading.parentElement;
+
+    for (
+        let i = 0;
+        i < 8 && element;
+        i++
+    ) {
+
+        const text =
+            normaliseText(
+                element.innerText
+            );
 
         if (
             text.length > 100 &&
@@ -167,29 +491,49 @@ function getVisibleEmailCard() {
             return element;
         }
 
-        element = element.parentElement;
+        element =
+            element.parentElement;
     }
 
     return heading.parentElement;
 }
 
-function extractLabelValue(container, label) {
-    for (const element of container.querySelectorAll(
-        "p,div,span,strong,b"
-    )) {
-        if (!isVisible(element)) continue;
 
-        const text = normaliseText(
-            element.innerText ||
-            element.textContent
-        );
+// ============================================================
+// EXTRACT LABEL VALUE
+// ============================================================
+
+function extractLabelValue(
+    container,
+    label
+) {
+
+    for (
+        const element
+        of container.querySelectorAll(
+            "p,div,span,strong,b"
+        )
+    ) {
+
+        if (!isVisible(element)) {
+            continue;
+        }
+
+        const text =
+            normaliseText(
+                element.innerText ||
+                element.textContent
+            );
 
         if (
             text
                 .toLowerCase()
-                .startsWith(label.toLowerCase()) &&
+                .startsWith(
+                    label.toLowerCase()
+                ) &&
             text.length > label.length
         ) {
+
             return text
                 .slice(label.length)
                 .trim();
@@ -199,12 +543,26 @@ function extractLabelValue(container, label) {
     return "";
 }
 
+
+// ============================================================
+// EXTRACT BODY FROM ORIGINAL DATASET CARD
+// ============================================================
+
 function extractBodyFromCard(card) {
-    const clone = card.cloneNode(true);
+
+    const clone =
+        card.cloneNode(true);
 
     clone.querySelectorAll(
-        "h1,h2,h3,.email-header,.header,[class*='ground'],[id*='ground']"
-    ).forEach(el => el.remove());
+        "h1,h2,h3," +
+        ".email-header," +
+        ".header," +
+        "[class*='ground']," +
+        "[id*='ground']"
+    ).forEach(
+        element =>
+            element.remove()
+    );
 
     return removeMetadata(
         clone.innerText ||
@@ -213,144 +571,296 @@ function extractBodyFromCard(card) {
     );
 }
 
+
+// ============================================================
+// REMOVE TEST-PAGE METADATA
+// ============================================================
+
 function removeMetadata(text) {
-    return String(text || "")
-        .replace(/\r/g, "")
+
+    return String(
+        text || ""
+    )
+        .replace(
+            /\r/g,
+            ""
+        )
         .split("\n")
-        .map(line => line.trim())
-        .filter(line =>
-            line &&
-            !/^University Email$/i.test(line) &&
-            !/^From:/i.test(line) &&
-            !/^Subject:/i.test(line) &&
-            !/^Dataset ground truth:/i.test(line)
+        .map(
+            line =>
+                line.trim()
+        )
+        .filter(
+            line =>
+                line &&
+                !/^University Email$/i
+                    .test(line) &&
+                !/^From:/i
+                    .test(line) &&
+                !/^Subject:/i
+                    .test(line) &&
+                !/^Dataset ground truth:/i
+                    .test(line)
         )
         .join("\n");
 }
 
+
+// ============================================================
+// CLEAN EMAIL BODY
+// ============================================================
+
 function cleanEmailBody(text) {
-    return removeMetadata(text).trim();
+
+    return removeMetadata(
+        text
+    ).trim();
 }
 
+
+// ============================================================
+// NORMALISE TEXT
+// ============================================================
+
 function normaliseText(text) {
-    return String(text || "")
-        .replace(/\s+/g, " ")
+
+    return String(
+        text || ""
+    )
+        .replace(
+            /\s+/g,
+            " "
+        )
         .trim();
 }
 
-function isVisible(element) {
-    if (!element) return false;
 
-    const style = getComputedStyle(element);
+// ============================================================
+// VISIBILITY CHECK
+// ============================================================
+
+function isVisible(element) {
+
+    if (!element) {
+        return false;
+    }
+
+    const style =
+        getComputedStyle(element);
 
     return (
         style.display !== "none" &&
         style.visibility !== "hidden" &&
-        element.getClientRects().length > 0
+        element
+            .getClientRects()
+            .length > 0
     );
 }
 
-function displayResult(data, email) {
-    removeElement(RESULT_ID);
 
-    const isPhishing = String(
-        data.prediction || ""
-    )
-        .toLowerCase()
-        .includes("phishing");
+// ============================================================
+// DISPLAY CLASSIFICATION RESULT
+// ============================================================
 
-    const container = document.createElement("div");
-    container.id = RESULT_ID;
+function displayResult(
+    data,
+    email
+) {
 
-    Object.assign(container.style, {
-        position: "fixed",
-        top: "78px",
-        right: "20px",
-        width: "360px",
-        maxHeight: "calc(100vh - 100px)",
-        overflowY: "auto",
-        zIndex: "2147483647",
-        background: "#fff",
-        border: isPhishing
-            ? "1px solid #dc2626"
-            : "1px solid #16a34a",
-        borderRadius: "10px",
-        boxShadow: "0 8px 25px rgba(0,0,0,.2)",
-        padding: "16px",
-        fontFamily: "Arial, sans-serif",
-        color: "#172b4d"
-    });
+    removeElement(
+        RESULT_ID
+    );
 
-    const header = document.createElement("div");
+    const isPhishing =
+        String(
+            data.prediction || ""
+        )
+            .toLowerCase()
+            .includes("phishing");
 
-    Object.assign(header.style, {
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center"
-    });
+    const container =
+        document.createElement(
+            "div"
+        );
 
-    const title = document.createElement("strong");
+    container.id =
+        RESULT_ID;
 
-    title.textContent = isPhishing
-        ? "⚠️ Potential Phishing Email"
-        : "✅ Safe Email";
-
-    title.style.color = isPhishing
-        ? "#b91c1c"
-        : "#15803d";
-
-    title.style.fontSize = "16px";
-
-    const close = document.createElement("button");
-
-    close.textContent = "×";
-
-    Object.assign(close.style, {
-        border: "none",
-        background: "transparent",
-        fontSize: "20px",
-        cursor: "pointer",
-        color: "#6b7280"
-    });
-
-    close.onclick = () => container.remove();
-
-    header.append(title, close);
-    container.appendChild(header);
-
-    appendText(
-        container,
-        `Confidence: ${formatPercentage(
-            data.confidence_percentage ??
-            data.confidence
-        )}`,
+    Object.assign(
+        container.style,
         {
-            margin: "10px 0 5px",
-            fontSize: "13px"
+            position: "fixed",
+            top: "78px",
+            right: "20px",
+            width: "360px",
+            maxHeight:
+                "calc(100vh - 100px)",
+            overflowY: "auto",
+            zIndex:
+                "2147483647",
+            background: "#fff",
+
+            border:
+                isPhishing
+                    ? "1px solid #dc2626"
+                    : "1px solid #16a34a",
+
+            borderRadius: "10px",
+
+            boxShadow:
+                "0 8px 25px rgba(0,0,0,.2)",
+
+            padding: "16px",
+
+            fontFamily:
+                "Arial, sans-serif",
+
+            color: "#172b4d"
         }
     );
 
+
+    // --------------------------------------------------------
+    // RESULT HEADER
+    // --------------------------------------------------------
+
+    const header =
+        document.createElement(
+            "div"
+        );
+
+    Object.assign(
+        header.style,
+        {
+            display: "flex",
+            justifyContent:
+                "space-between",
+            alignItems:
+                "center"
+        }
+    );
+
+    const title =
+        document.createElement(
+            "strong"
+        );
+
+    title.textContent =
+        isPhishing
+            ? "⚠️ Potential Phishing Email"
+            : "✅ Safe Email";
+
+    title.style.color =
+        isPhishing
+            ? "#b91c1c"
+            : "#15803d";
+
+    title.style.fontSize =
+        "16px";
+
+    const close =
+        document.createElement(
+            "button"
+        );
+
+    close.textContent =
+        "×";
+
+    Object.assign(
+        close.style,
+        {
+            border: "none",
+            background:
+                "transparent",
+            fontSize: "20px",
+            cursor: "pointer",
+            color: "#6b7280"
+        }
+    );
+
+    close.onclick =
+        () =>
+            container.remove();
+
+    header.append(
+        title,
+        close
+    );
+
+    container.appendChild(
+        header
+    );
+
+
+    // --------------------------------------------------------
+    // CONFIDENCE
+    // --------------------------------------------------------
+    //
+    // IMPORTANT:
+    // Use ONLY raw 0–1 probability values from FastAPI.
+    // Do NOT use confidence_percentage here.
+    // --------------------------------------------------------
+
     appendText(
         container,
-        `Safe: ${formatPercentage(
-            data.safe_probability_percentage ??
+
+        `Confidence: ${formatRawProbability(
+            data.confidence
+        )}`,
+
+        {
+            margin:
+                "10px 0 5px",
+            fontSize:
+                "13px"
+        }
+    );
+
+
+    // --------------------------------------------------------
+    // CLASS PROBABILITIES
+    // --------------------------------------------------------
+    //
+    // Again, use only the raw values:
+    //
+    // safe_probability
+    // phishing_probability
+    //
+    // 0.0063 becomes 0.63%.
+    // 0.6400 becomes 64.00%.
+    // --------------------------------------------------------
+
+    appendText(
+        container,
+
+        `Safe: ${formatRawProbability(
             data.safe_probability
         )} | ` +
-        `Phishing: ${formatPercentage(
-            data.phishing_probability_percentage ??
+
+        `Phishing: ${formatRawProbability(
             data.phishing_probability
         )}`,
+
         {
             margin: "4px 0",
             fontSize: "12px"
         }
     );
 
-    const indicators = Array.isArray(data.indicators)
-        ? data.indicators
-        : [];
+
+    // --------------------------------------------------------
+    // SUPPLEMENTARY SECURITY INDICATORS
+    // --------------------------------------------------------
+
+    const indicators =
+        Array.isArray(
+            data.indicators
+        )
+            ? data.indicators
+            : [];
 
     if (indicators.length) {
+
         appendText(
             container,
             "Detected Indicators:",
@@ -361,54 +871,88 @@ function displayResult(data, email) {
             }
         );
 
-        indicators.forEach(indicator => {
-            appendText(
-                container,
-                `⚠️ ${indicator}`,
-                {
-                    marginTop: "6px",
-                    padding: "7px",
-                    background: "#fef3c7",
-                    color: "#92400e",
-                    borderRadius: "5px",
-                    fontSize: "11px"
-                }
-            );
-        });
+        indicators.forEach(
+            indicator => {
+
+                appendText(
+                    container,
+                    `⚠️ ${indicator}`,
+                    {
+                        marginTop: "6px",
+                        padding: "7px",
+                        background:
+                            "#fef3c7",
+                        color:
+                            "#92400e",
+                        borderRadius:
+                            "5px",
+                        fontSize:
+                            "11px"
+                    }
+                );
+            }
+        );
     }
 
-    const details = document.createElement("div");
 
-    Object.assign(details.style, {
-        marginTop: "12px",
-        paddingTop: "10px",
-        borderTop: "1px solid #e5e7eb",
-        fontSize: "11px",
-        lineHeight: "1.6"
-    });
+    // --------------------------------------------------------
+    // EXTRACTED EMAIL DETAILS
+    // --------------------------------------------------------
+
+    const details =
+        document.createElement(
+            "div"
+        );
+
+    Object.assign(
+        details.style,
+        {
+            marginTop: "12px",
+            paddingTop: "10px",
+            borderTop:
+                "1px solid #e5e7eb",
+            fontSize: "11px",
+            lineHeight: "1.6"
+        }
+    );
 
     appendDetail(
         details,
         "Sender",
-        email.sender || "Not detected"
+        email.sender ||
+            "Not detected"
     );
 
     appendDetail(
         details,
         "Subject",
-        email.subject || "Not detected"
+        email.subject ||
+            "Not detected"
     );
 
-    container.appendChild(details);
+    container.appendChild(
+        details
+    );
 
-    // Explainable AI
-    const explainSection = document.createElement("div");
 
-    Object.assign(explainSection.style, {
-        marginTop: "14px",
-        paddingTop: "12px",
-        borderTop: "1px solid #e5e7eb"
-    });
+    // ========================================================
+    // EXPLAINABLE AI
+    // ========================================================
+
+    const explainSection =
+        document.createElement(
+            "div"
+        );
+
+    Object.assign(
+        explainSection.style,
+        {
+            marginTop: "14px",
+            paddingTop: "12px",
+            borderTop:
+                "1px solid #e5e7eb"
+        }
+    );
 
     appendText(
         explainSection,
@@ -431,97 +975,150 @@ function displayResult(data, email) {
         }
     );
 
-    const output = document.createElement("div");
-    output.style.marginTop = "10px";
-
-    const explainButton = document.createElement("button");
-
-    explainButton.textContent = "🧠 Explain Decision";
-
-    Object.assign(explainButton.style, {
-        background: "#fff",
-        color: "#374151",
-        border: "1px solid #cbd5e1",
-        borderRadius: "6px",
-        padding: "8px 12px",
-        fontSize: "12px",
-        fontWeight: "bold",
-        cursor: "pointer"
-    });
-
-    explainButton.onclick = () =>
-        generateExplanation(
-            explainButton,
-            output,
-            email
+    const output =
+        document.createElement(
+            "div"
         );
+
+    output.style.marginTop =
+        "10px";
+
+    const explainButton =
+        document.createElement(
+            "button"
+        );
+
+    explainButton.textContent =
+        "🧠 Explain Decision";
+
+    Object.assign(
+        explainButton.style,
+        {
+            background: "#fff",
+            color: "#374151",
+            border:
+                "1px solid #cbd5e1",
+            borderRadius: "6px",
+            padding: "8px 12px",
+            fontSize: "12px",
+            fontWeight: "bold",
+            cursor: "pointer"
+        }
+    );
+
+    explainButton.onclick =
+        () =>
+            generateExplanation(
+                explainButton,
+                output,
+                email
+            );
 
     explainSection.append(
         explainButton,
         output
     );
 
-    container.appendChild(explainSection);
+    container.appendChild(
+        explainSection
+    );
+
+
+    // --------------------------------------------------------
+    // MODEL INFORMATION
+    // --------------------------------------------------------
 
     appendText(
         container,
+
         "Powered by DeBERTa-v3-large + SHAP Explainable AI",
+
         {
             marginTop: "14px",
             paddingTop: "10px",
-            borderTop: "1px solid #e5e7eb",
+            borderTop:
+                "1px solid #e5e7eb",
             fontSize: "10px",
             color: "#9ca3af"
         }
     );
 
-    document.body.appendChild(container);
+    document.body.appendChild(
+        container
+    );
 }
+
+
+// ============================================================
+// GENERATE SHAP EXPLANATION
+// ============================================================
 
 async function generateExplanation(
     button,
     output,
     email
 ) {
-    output.innerHTML = "";
+
+    output.innerHTML =
+        "";
 
     try {
-        button.disabled = true;
+
+        button.disabled =
+            true;
 
         button.textContent =
             "⏳ Generating Explanation...";
 
-        button.style.background = "#e5e7eb";
-        button.style.cursor = "wait";
+        button.style.background =
+            "#e5e7eb";
 
-        const response = await fetch(
-            EXPLAIN_URL,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    sender: email.sender || "",
-                    subject: email.subject || "",
-                    body: email.body || ""
-                })
-            }
-        );
+        button.style.cursor =
+            "wait";
+
+        const response =
+            await fetch(
+                EXPLAIN_URL,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            sender:
+                                email.sender || "",
+                            subject:
+                                email.subject || "",
+                            body:
+                                email.body || ""
+                        })
+                }
+            );
 
         if (!response.ok) {
+
             throw new Error(
-                await readApiError(response) ||
+                await readApiError(
+                    response
+                ) ||
                 "Unable to generate the SHAP explanation."
             );
         }
 
+        const explanationData =
+            await response.json();
+
         displayExplanation(
             output,
-            await response.json()
+            explanationData
         );
 
     } catch (error) {
+
         console.error(
             "SHAP explanation error:",
             error
@@ -529,83 +1126,114 @@ async function generateExplanation(
 
         appendText(
             output,
+
             `Unable to generate SHAP explanation: ${
                 error.message ||
                 "Unknown error"
             }`,
+
             {
                 padding: "9px",
-                background: "#fee2e2",
-                color: "#991b1b",
-                borderRadius: "6px",
-                fontSize: "11px",
-                lineHeight: "1.4"
+                background:
+                    "#fee2e2",
+                color:
+                    "#991b1b",
+                borderRadius:
+                    "6px",
+                fontSize:
+                    "11px",
+                lineHeight:
+                    "1.4"
             }
         );
 
     } finally {
-        button.disabled = false;
+
+        button.disabled =
+            false;
 
         button.textContent =
             "🧠 Explain Decision";
 
-        button.style.background = "#fff";
-        button.style.cursor = "pointer";
+        button.style.background =
+            "#fff";
+
+        button.style.cursor =
+            "pointer";
     }
 }
+
+
+// ============================================================
+// DISPLAY SHAP EXPLANATION
+// ============================================================
 
 function displayExplanation(
     output,
     data
 ) {
-    output.innerHTML = "";
+
+    output.innerHTML =
+        "";
 
     appendText(
         output,
+
         "✅ SHAP explanation generated successfully.",
+
         {
             padding: "8px",
-            background: "#dcfce7",
-            color: "#166534",
-            borderRadius: "6px",
-            fontSize: "11px",
-            marginBottom: "10px"
+            background:
+                "#dcfce7",
+            color:
+                "#166534",
+            borderRadius:
+                "6px",
+            fontSize:
+                "11px",
+            marginBottom:
+                "10px"
         }
     );
 
     appendText(
         output,
+
         `Explanation for: ${
             data.prediction ||
             data.label ||
             "Model Prediction"
         }`,
+
         {
             fontSize: "13px",
             fontWeight: "bold",
-            marginBottom: "10px"
+            marginBottom:
+                "10px"
         }
     );
 
-    const supporting = getFactorArray(
-        data,
-        [
-            "supporting_factors",
-            "top_supporting_factors",
-            "factors_supporting",
-            "positive_factors"
-        ]
-    );
+    const supporting =
+        getFactorArray(
+            data,
+            [
+                "supporting_factors",
+                "top_supporting_factors",
+                "factors_supporting",
+                "positive_factors"
+            ]
+        );
 
-    const opposing = getFactorArray(
-        data,
-        [
-            "opposing_factors",
-            "top_opposing_factors",
-            "factors_against",
-            "negative_factors"
-        ]
-    );
+    const opposing =
+        getFactorArray(
+            data,
+            [
+                "opposing_factors",
+                "top_opposing_factors",
+                "factors_against",
+                "negative_factors"
+            ]
+        );
 
     appendFactorSection(
         output,
@@ -627,7 +1255,9 @@ function displayExplanation(
 
     appendText(
         output,
+
         "SHAP contributions show how individual words and tokens influenced the model's prediction.",
+
         {
             marginTop: "10px",
             fontSize: "10px",
@@ -637,18 +1267,36 @@ function displayExplanation(
     );
 }
 
+
+// ============================================================
+// GET FACTOR ARRAY
+// ============================================================
+
 function getFactorArray(
     data,
     keys
 ) {
-    for (const key of keys) {
-        if (Array.isArray(data[key])) {
+
+    for (
+        const key of keys
+    ) {
+
+        if (
+            Array.isArray(
+                data[key]
+            )
+        ) {
             return data[key];
         }
     }
 
     return [];
 }
+
+
+// ============================================================
+// DISPLAY SHAP FACTOR SECTION
+// ============================================================
 
 function appendFactorSection(
     output,
@@ -658,9 +1306,14 @@ function appendFactorSection(
     colour,
     emptyMessage
 ) {
-    const section = document.createElement("div");
 
-    section.style.marginTop = "12px";
+    const section =
+        document.createElement(
+            "div"
+        );
+
+    section.style.marginTop =
+        "12px";
 
     appendText(
         section,
@@ -674,6 +1327,7 @@ function appendFactorSection(
     );
 
     if (!factors.length) {
+
         appendText(
             section,
             emptyMessage,
@@ -687,47 +1341,84 @@ function appendFactorSection(
         );
 
     } else {
-        const list = document.createElement("ol");
 
-        Object.assign(list.style, {
-            margin: "0",
-            paddingLeft: "20px",
-            fontSize: "11px",
-            lineHeight: "1.8"
-        });
+        const list =
+            document.createElement(
+                "ol"
+            );
+
+        Object.assign(
+            list.style,
+            {
+                margin: "0",
+                paddingLeft: "20px",
+                fontSize: "11px",
+                lineHeight: "1.8"
+            }
+        );
 
         factors
             .slice(0, 10)
-            .forEach(factor => {
-                const token = getFactorToken(factor);
-                const contribution =
-                    getFactorContribution(factor);
+            .forEach(
+                factor => {
 
-                const item =
-                    document.createElement("li");
+                    const token =
+                        getFactorToken(
+                            factor
+                        );
 
-                item.textContent =
-                    contribution === null
-                        ? token
-                        : `${token} → Contribution: ${
-                            contribution.toFixed(6)
-                        }`;
+                    const contribution =
+                        getFactorContribution(
+                            factor
+                        );
 
-                list.appendChild(item);
-            });
+                    const item =
+                        document.createElement(
+                            "li"
+                        );
 
-        section.appendChild(list);
+                    item.textContent =
+                        contribution === null
+                            ? token
+                            : `${token} → Contribution: ${contribution.toFixed(6)}`;
+
+                    list.appendChild(
+                        item
+                    );
+                }
+            );
+
+        section.appendChild(
+            list
+        );
     }
 
-    output.appendChild(section);
+    output.appendChild(
+        section
+    );
 }
 
-function getFactorToken(factor) {
-    if (typeof factor === "string") {
+
+// ============================================================
+// GET SHAP TOKEN
+// ============================================================
+
+function getFactorToken(
+    factor
+) {
+
+    if (
+        typeof factor ===
+        "string"
+    ) {
         return factor;
     }
 
-    if (!factor || typeof factor !== "object") {
+    if (
+        !factor ||
+        typeof factor !==
+            "object"
+    ) {
         return "Unknown token";
     }
 
@@ -740,95 +1431,172 @@ function getFactorToken(factor) {
     );
 }
 
-function getFactorContribution(factor) {
-    if (!factor || typeof factor !== "object") {
+
+// ============================================================
+// GET SHAP CONTRIBUTION
+// ============================================================
+
+function getFactorContribution(
+    factor
+) {
+
+    if (
+        !factor ||
+        typeof factor !==
+            "object"
+    ) {
         return null;
     }
 
-    const number = Number(
-        factor.contribution ??
-        factor.shap_value ??
-        factor.value
-    );
+    const number =
+        Number(
+            factor.contribution ??
+            factor.shap_value ??
+            factor.value
+        );
 
-    return Number.isFinite(number)
+    return Number.isFinite(
+        number
+    )
         ? number
         : null;
 }
+
+
+// ============================================================
+// GENERIC TEXT ELEMENT
+// ============================================================
 
 function appendText(
     parent,
     text,
     styles = {}
 ) {
-    const element =
-        document.createElement("div");
 
-    element.textContent = text;
+    const element =
+        document.createElement(
+            "div"
+        );
+
+    element.textContent =
+        text;
 
     Object.assign(
         element.style,
         styles
     );
 
-    parent.appendChild(element);
+    parent.appendChild(
+        element
+    );
 
     return element;
 }
+
+
+// ============================================================
+// EMAIL DETAIL ROW
+// ============================================================
 
 function appendDetail(
     parent,
     label,
     value
 ) {
+
     const row =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
     const strong =
-        document.createElement("strong");
+        document.createElement(
+            "strong"
+        );
 
     strong.textContent =
         `${label}: `;
 
     const text =
-        document.createElement("span");
+        document.createElement(
+            "span"
+        );
 
-    text.textContent = value;
+    text.textContent =
+        value;
 
     row.append(
         strong,
         text
     );
 
-    parent.appendChild(row);
+    parent.appendChild(
+        row
+    );
 }
 
-function formatPercentage(value) {
-    const number = Number(value);
 
-    if (!Number.isFinite(number)) {
+// ============================================================
+// RAW PROBABILITY FORMATTER
+// ============================================================
+//
+// FastAPI raw probabilities are expected to be between 0 and 1.
+//
+// Examples:
+//
+// 0.0063 -> 0.63%
+// 0.64   -> 64.00%
+// 0.9937 -> 99.37%
+//
+// This function ALWAYS performs exactly one conversion.
+// ============================================================
+
+function formatRawProbability(
+    value
+) {
+
+    const number =
+        Number(value);
+
+    if (
+        !Number.isFinite(number)
+    ) {
         return "N/A";
     }
 
     return `${
-        (number <= 1
-            ? number * 100
-            : number
-        ).toFixed(2)
+        (number * 100).toFixed(2)
     }%`;
 }
 
+
+// ============================================================
+// REMOVE ELEMENT
+// ============================================================
+
 function removeElement(id) {
+
     const element =
-        document.getElementById(id);
+        document.getElementById(
+            id
+        );
 
     if (element) {
         element.remove();
     }
 }
 
-async function readApiError(response) {
+
+// ============================================================
+// READ FASTAPI ERROR
+// ============================================================
+
+async function readApiError(
+    response
+) {
+
     try {
+
         const data =
             await response.json();
 
@@ -840,65 +1608,150 @@ async function readApiError(response) {
         );
 
     } catch {
+
         return "";
     }
 }
 
+
+// ============================================================
+// DISPLAY ERROR
+// ============================================================
+
 function showError(message) {
-    removeElement(ERROR_ID);
+
+    removeElement(
+        ERROR_ID
+    );
 
     const error =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
 
-    error.id = ERROR_ID;
+    error.id =
+        ERROR_ID;
 
     error.textContent =
         `⚠️ ${message}`;
 
-    Object.assign(error.style, {
-        position: "fixed",
-        top: "78px",
-        right: "20px",
-        width: "340px",
-        zIndex: "2147483647",
-        background: "#fee2e2",
-        color: "#991b1b",
-        border: "1px solid #dc2626",
-        borderRadius: "8px",
-        padding: "14px",
-        fontFamily: "Arial, sans-serif",
-        fontSize: "13px",
-        boxShadow: "0 5px 15px rgba(0,0,0,.15)"
-    });
-
-    document.body.appendChild(error);
-
-    setTimeout(() => {
-        if (document.body.contains(error)) {
-            error.remove();
+    Object.assign(
+        error.style,
+        {
+            position: "fixed",
+            top: "78px",
+            right: "20px",
+            width: "340px",
+            zIndex:
+                "2147483647",
+            background:
+                "#fee2e2",
+            color:
+                "#991b1b",
+            border:
+                "1px solid #dc2626",
+            borderRadius:
+                "8px",
+            padding:
+                "14px",
+            fontFamily:
+                "Arial, sans-serif",
+            fontSize:
+                "13px",
+            boxShadow:
+                "0 5px 15px rgba(0,0,0,.15)"
         }
-    }, 6000);
+    );
+
+    document.body.appendChild(
+        error
+    );
+
+    setTimeout(
+        () => {
+
+            if (
+                document.body.contains(
+                    error
+                )
+            ) {
+                error.remove();
+            }
+
+        },
+        6000
+    );
 }
 
-// Popup communication remains compatible with popup.js.
+
+// ============================================================
+// POPUP COMMUNICATION
+// ============================================================
+//
+// popup.js sends:
+//
+//     { action: "getEmail" }
+//
+// IMPORTANT:
+// This calls the SAME extractEmail() function used by the
+// webpage Scan button. Therefore both interfaces receive the
+// same sender, subject and body.
+// ============================================================
+
 chrome.runtime.onMessage.addListener(
     (
         request,
         sender,
         sendResponse
     ) => {
-        if (request.action !== "getEmail") {
+
+        if (
+            request.action !==
+            "getEmail"
+        ) {
             return;
         }
 
         try {
+
             const email =
                 extractEmail();
+
+            console.log(
+                "========== POPUP EXTRACTION =========="
+            );
+
+            console.log(
+                "Sender:",
+                email.sender
+            );
+
+            console.log(
+                "Subject:",
+                email.subject
+            );
+
+            console.log(
+                "Body length:",
+                email.body
+                    ? email.body.length
+                    : 0
+            );
+
+            console.log(
+                "Body:",
+                email.body
+            );
+
+            console.log(
+                "======================================"
+            );
 
             if (
                 !email.body ||
                 !email.body.trim()
             ) {
+
                 sendResponse({
                     success: false,
                     error:
@@ -910,12 +1763,21 @@ chrome.runtime.onMessage.addListener(
 
             sendResponse({
                 success: true,
-                sender: email.sender,
-                subject: email.subject,
-                body: email.body
+                sender:
+                    email.sender || "",
+                subject:
+                    email.subject || "",
+                body:
+                    email.body || ""
             });
 
         } catch (error) {
+
+            console.error(
+                "[Phishing Detector] Email extraction error:",
+                error
+            );
+
             sendResponse({
                 success: false,
                 error:

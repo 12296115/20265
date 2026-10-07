@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "University Phishing Email Detector",
     "version": "1.0.0",
-    "description": "Detects potentially phishing emails using a trained DistilBERT model.",
+    "description": "Detects potentially phishing emails using a DeBERTa-v3-large gated-hybrid model with explainable AI.",
 
     "permissions": [
         "activeTab",
