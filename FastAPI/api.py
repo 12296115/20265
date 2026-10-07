@@ -28,6 +28,7 @@ from pydantic import BaseModel
 import os
 import re
 import traceback
+import gc
 
 import numpy as np
 import torch
@@ -46,6 +47,24 @@ MODEL_PATH = "./deberta_v3_large_phishing_model"
 MODEL_NAME = "microsoft/deberta-v3-large"
 
 MAX_LENGTH = 512
+
+# ============================================================
+# SHAP CONFIGURATION
+# ============================================================
+#
+# Normal classification continues to use MAX_LENGTH = 512.
+# SHAP uses a shorter input and bounded evaluation budget
+# because post-hoc explanation of DeBERTa-v3-large requires
+# many repeated forward passes through the model.
+#
+# Start conservatively for stability. These values can be
+# increased later after the explanation path is confirmed
+# to run reliably on the available hardware.
+# ============================================================
+
+SHAP_MAX_TOKENS = 64
+SHAP_MAX_EVALS = 150
+SHAP_BATCH_SIZE = 4
 
 NUM_FEATURES = 12
 
@@ -1955,6 +1974,63 @@ def build_indicator_message(
 
 
 # ============================================================
+# PREPARE SHORT TEXT FOR SHAP
+# ============================================================
+#
+# IMPORTANT:
+# The normal classifier still evaluates the original email
+# using MAX_LENGTH = 512.
+#
+# Only the post-hoc SHAP explanation is shortened. Reducing
+# the text before it reaches the SHAP masker is important:
+# otherwise SHAP can create a very large number of masked
+# samples for long emails.
+# ============================================================
+
+def prepare_text_for_shap(
+    text
+):
+
+    if not text:
+
+        return ""
+
+
+    encoded = tokenizer(
+
+        text,
+
+        truncation=True,
+
+        max_length=SHAP_MAX_TOKENS,
+
+        add_special_tokens=False,
+
+        return_tensors=None
+
+    )
+
+
+    input_ids = encoded[
+        "input_ids"
+    ]
+
+
+    shortened_text = tokenizer.decode(
+
+        input_ids,
+
+        skip_special_tokens=True,
+
+        clean_up_tokenization_spaces=True
+
+    )
+
+
+    return shortened_text
+
+
+# ============================================================
 # SHAP PREDICTION FUNCTION
 #
 # SHAP passes masked text to this function.
@@ -2002,7 +2078,7 @@ def shap_predict(
 
         truncation=True,
 
-        max_length=MAX_LENGTH
+        max_length=SHAP_MAX_TOKENS
 
     )
 
@@ -2649,7 +2725,76 @@ def explain(
 
 
         # ----------------------------------------------------
-        # Generate SHAP values
+        # Prepare resources before SHAP
+        # ----------------------------------------------------
+
+        gc.collect()
+
+        if torch.cuda.is_available():
+
+            torch.cuda.empty_cache()
+
+
+        # ----------------------------------------------------
+        # Prepare shortened text for SHAP only
+        # ----------------------------------------------------
+
+        print(
+            "Preparing shortened text for SHAP..."
+        )
+
+
+        shap_text = prepare_text_for_shap(
+            email_text
+        )
+
+
+        if not shap_text.strip():
+
+            return {
+
+                "success":
+                    False,
+
+                "message":
+                    "Unable to prepare text for SHAP explanation"
+
+            }
+
+
+        shap_token_count = len(
+
+            tokenizer.encode(
+
+                shap_text,
+
+                add_special_tokens=False
+
+            )
+
+        )
+
+
+        print(
+            "SHAP input tokens:",
+            shap_token_count
+        )
+
+
+        print(
+            "SHAP max evaluations:",
+            SHAP_MAX_EVALS
+        )
+
+
+        print(
+            "SHAP batch size:",
+            SHAP_BATCH_SIZE
+        )
+
+
+        # ----------------------------------------------------
+        # Generate bounded SHAP values
         # ----------------------------------------------------
 
         print(
@@ -2659,7 +2804,11 @@ def explain(
 
         shap_values = explainer(
 
-            [email_text]
+            [shap_text],
+
+            max_evals=SHAP_MAX_EVALS,
+
+            batch_size=SHAP_BATCH_SIZE
 
         )
 
