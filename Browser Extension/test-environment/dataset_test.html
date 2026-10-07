@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Dataset Email Test Environment</title>
+
+    
+
+
+<style id="gmail-ui">
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{font-family:Arial,Helvetica,sans-serif;background:#f6f8fc;color:#202124;padding:0}
+.app{height:100vh;display:grid;grid-template-rows:64px minmax(0,1fr)}
+.topbar{display:grid;grid-template-columns:182px minmax(280px,680px) 1fr;align-items:center;gap:14px;padding:8px 16px;background:#f6f8fc;border-bottom:1px solid #e4e7eb}
+.brand{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:600}
+.logo{width:28px;height:28px;border:2px solid #1a73e8;border-radius:6px;display:grid;place-items:center;font-size:16px;background:#fff}
+.search{height:46px;border:0;border-radius:24px;background:#eaf1fb;padding:0 18px;font-size:14px;outline:none}
+.badge{justify-self:end;background:#e8f0fe;color:#174ea6;padding:7px 12px;border-radius:18px;font-size:12px;font-weight:700}
+.workspace{display:grid;grid-template-columns:182px 330px minmax(0,1fr);min-height:0;overflow:hidden}
+.sidebar{padding:14px 10px;background:#f6f8fc;overflow:hidden}
+.compose{width:122px;padding:13px 14px;border:0;border-radius:16px;background:#c2e7ff;font-weight:700;margin-bottom:18px}
+.nav{padding:9px 12px;border-radius:0 18px 18px 0;font-size:14px;margin:2px 0}
+.nav.active{background:#d3e3fd;font-weight:700}
+.eval{margin:22px 8px 0;padding:12px;border:1px solid #dfe3e7;border-radius:10px;background:#fff;font-size:12px;line-height:1.55}
+.eval-title{font-size:10px;letter-spacing:.12em;color:#6b7280;font-weight:700;margin-bottom:7px}
+.mail-column{min-height:0;background:#fff;border-left:1px solid #e0e0e0;border-right:1px solid #e0e0e0;display:grid;grid-template-rows:auto minmax(0,1fr)}
+.inbox-head{padding:15px 14px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;font-weight:700}
+#mailList{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
+.mail-row{padding:10px 12px;border-bottom:1px solid #edf0f2;cursor:pointer;background:#fff}
+.mail-row:hover{background:#f2f6fc}.mail-row.selected{background:#dbe8fb}
+.mail-row-top{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:700}
+.mail-row-subject{font-size:13px;font-weight:700;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mail-row-preview{font-size:11px;color:#5f6368;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reader{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable;background:#fff;padding:26px 34px 60px}
+.reader-meta{font-size:12px;color:#5f6368;margin-bottom:12px}
+#subjectTitle{font-size:23px;font-weight:500;margin:8px 0 22px}
+.sender-line{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.avatar{width:38px;height:38px;border-radius:50%;background:#d3e3fd;color:#174ea6;display:grid;place-items:center;font-weight:700}
+#from{font-weight:700;font-size:14px}
+.ground-truth{display:inline-block;margin:0 0 20px;padding:6px 10px;border-radius:14px;background:#eef7ee;font-size:12px;font-weight:700}
+.ground-truth.phishing{background:#fff4e5;color:#b45309}
+#body{font-size:14px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.statusbar{font-size:11px;color:#5f6368;margin-top:28px;padding-top:12px;border-top:1px solid #eee}
+#error{margin-top:12px;padding:10px;background:#fee2e2;color:#991b1b;border-radius:6px}
+#emailSelector{display:none}
+#emailContainer{display:contents}
+#emailFrom,#emailSubject,#emailBody,#groundTruthLabel{display:none}
+@media(max-width:900px){.workspace{grid-template-columns:150px 280px minmax(0,1fr)}.topbar{grid-template-columns:150px 1fr auto}}
+</style>
+
+</head>
+
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="logo">✉</div><span>Mail</span></div>
+    <input id="searchBox" class="search" type="search" placeholder="Search held-out evaluation mail">
+    <div class="badge">Held-out Dataset Test</div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <button class="compose" type="button">＋ Compose</button>
+      <div class="nav active">▣ &nbsp; Inbox <span id="inboxCount" style="float:right">50</span></div>
+      <div class="nav">☆ &nbsp; Starred</div>
+      <div class="nav">◷ &nbsp; Snoozed</div>
+      <div class="nav">➤ &nbsp; Sent</div>
+      <div class="nav">▤ &nbsp; Drafts</div>
+      <div class="eval">
+        <div class="eval-title">EVALUATION</div>
+        <strong>Held-out test set</strong><br>
+        Ground truth retained<br>
+        <span id="balanceText">25 Safe + 25 Phishing</span><br>
+        Links shown as inert text
+      </div>
+    </aside>
+
+    <section class="mail-column">
+      <div class="inbox-head"><span>Inbox</span><span id="messageCount">50 messages</span></div>
+      <div id="mailList"></div>
+    </section>
+
+    <main class="reader">
+      <div class="reader-meta" id="readerCounter">Email 1 of 50</div>
+      <div id="subjectTitle">Loading...</div>
+      <div class="sender-line">
+        <div class="avatar" id="avatar">E</div>
+        <div><div id="from">Loading...</div><div style="font-size:11px;color:#5f6368">to evaluation user</div></div>
+      </div>
+      <div id="groundTruthBadge" class="ground-truth">Ground truth: Loading...</div>
+      <div id="body">Loading email...</div>
+      <div id="status" class="statusbar">Loading dataset...</div>
+      <div id="error" style="display:none"></div>
+
+      <!-- Compatibility elements retained for the original dataset page logic. -->
+      <select id="emailSelector"></select>
+      <div id="emailContainer" data-email-type="" data-test-number="">
+        <span id="emailFrom"></span>
+        <span id="emailSubject"></span>
+        <span id="groundTruthLabel"></span>
+        <div id="emailBody"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
+// IMPORTANT:
+// This is the held-out test dataset used for the
+// current DeBERTa-v3-large evaluation.
+
+const DATASET_FILE =
+    "phishing_test.csv";
+
+
+// Number of Safe and Phishing emails to display.
+
+const NUMBER_OF_SAFE_EMAILS = 25;
+
+const NUMBER_OF_PHISHING_EMAILS = 25;
+
+
+// Fixed seed makes the selected emails reproducible.
+
+const RANDOM_SEED = 2026;
+
+
+// ============================================================
+// DOM ELEMENTS
+// ============================================================
+
+const selector =
+    document.getElementById(
+        "emailSelector"
+    );
+
+
+const emailFrom =
+    document.getElementById(
+        "emailFrom"
+    );
+
+
+const emailSubject =
+    document.getElementById(
+        "emailSubject"
+    );
+
+
+const emailBody =
+    document.getElementById(
+        "emailBody"
+    );
+
+
+const groundTruthLabel =
+    document.getElementById(
+        "groundTruthLabel"
+    );
+
+
+const status =
+    document.getElementById(
+        "status"
+    );
+
+
+const errorBox =
+    document.getElementById(
+        "error"
+    );
+
+
+// ============================================================
+// EMAIL STORAGE
+// ============================================================
+
+let testEmails = [];
+
+
+// ============================================================
+// SEEDED RANDOM NUMBER GENERATOR
+// ============================================================
+
+// This creates reproducible random selections.
+// The same seed produces the same 10 emails.
+
+function seededRandom(seed) {
+
+    let value = seed % 2147483647;
+
+    if (value <= 0) {
+        value += 2147483646;
+    }
+
+    return function () {
+
+        value =
+            value * 16807 %
+            2147483647;
+
+        return (
+            value - 1
+        ) / 2147483646;
+
+    };
+
+}
+
+
+// ============================================================
+// SEEDED SHUFFLE
+// ============================================================
+
+function seededShuffle(
+    array,
+    seed
+) {
+
+    const result =
+        [...array];
+
+    const random =
+        seededRandom(seed);
+
+
+    for (
+        let i = result.length - 1;
+        i > 0;
+        i--
+    ) {
+
+        const j =
+            Math.floor(
+                random() * (i + 1)
+            );
+
+
+        [
+            result[i],
+            result[j]
+        ] = [
+            result[j],
+            result[i]
+        ];
+
+    }
+
+
+    return result;
+
+}
+
+
+// ============================================================
+// CSV PARSER
+// Handles commas, quotes and new lines inside fields
+// ============================================================
+
+function parseCSV(text) {
+
+    const rows = [];
+
+    let row = [];
+
+    let field = "";
+
+    let insideQuotes = false;
+
+
+    for (
+        let i = 0;
+        i < text.length;
+        i++
+    ) {
+
+        const char =
+            text[i];
+
+        const next =
+            text[i + 1];
+
+
+        // ------------------------------------------------
+        // Quoted field
+        // ------------------------------------------------
+
+        if (char === '"') {
+
+            if (
+                insideQuotes &&
+                next === '"'
+            ) {
+
+                field += '"';
+
+                i++;
+
+            }
+
+            else {
+
+                insideQuotes =
+                    !insideQuotes;
+
+            }
+
+            continue;
+
+        }
+
+
+        // ------------------------------------------------
+        // Comma
+        // ------------------------------------------------
+
+        if (
+            char === "," &&
+            !insideQuotes
+        ) {
+
+            row.push(field);
+
+            field = "";
+
+            continue;
+
+        }
+
+
+        // ------------------------------------------------
+        // New line
+        // ------------------------------------------------
+
+        if (
+            (
+                char === "\n" ||
+                char === "\r"
+            ) &&
+            !insideQuotes
+        ) {
+
+            if (
+                char === "\r" &&
+                next === "\n"
+            ) {
+
+                i++;
+
+            }
+
+
+            row.push(field);
+
+            rows.push(row);
+
+            row = [];
+
+            field = "";
+
+            continue;
+
+        }
+
+
+        field += char;
+
+    }
+
+
+    // ------------------------------------------------
+    // Final field
+    // ------------------------------------------------
+
+    if (
+        field.length > 0 ||
+        row.length > 0
+    ) {
+
+        row.push(field);
+
+        rows.push(row);
+
+    }
+
+
+    return rows;
+
+}
+
+
+// ============================================================
+// CLEAN CSV VALUE
+// ============================================================
+
+function cleanCSVValue(value) {
+
+    if (
+        value === null ||
+        value === undefined
+    ) {
+
+        return "";
+
+    }
+
+
+    return String(value)
+        .trim()
+        .replace(/^"|"$/g, "");
+
+}
+
+
+// ============================================================
+// NORMALISE EMAIL TYPE
+// ============================================================
+
+function normaliseEmailType(
+    value
+) {
+
+    const type =
+        String(value)
+            .trim()
+            .toLowerCase();
+
+
+    if (
+        type.includes("phishing")
+    ) {
+
+        return "Phishing Email";
+
+    }
+
+
+    return "Safe Email";
+
+}
+
+
+// ============================================================
+// LOAD DATASET
+// ============================================================
+
+async function loadDataset() {
+
+    try {
+
+        status.textContent =
+            "Loading phishing_test.csv...";
+
+
+        // ------------------------------------------------
+        // Fetch CSV
+        // ------------------------------------------------
+
+        const response =
+            await fetch(
+                DATASET_FILE
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                "Could not load " +
+                DATASET_FILE +
+                ". Make sure phishing_test.csv " +
+                "is in the same folder as dataset_test.html."
+            );
+
+        }
+
+
+        const csvText =
+            await response.text();
+
+
+        // ------------------------------------------------
+        // Parse CSV
+        // ------------------------------------------------
+
+        const rows =
+            parseCSV(csvText);
+
+
+        if (
+            rows.length < 2
+        ) {
+
+            throw new Error(
+                "Dataset contains no email records."
+            );
+
+        }
+
+
+        // ------------------------------------------------
+        // Read headers
+        // ------------------------------------------------
+
+        const headers =
+            rows[0].map(
+                header =>
+                    cleanCSVValue(header)
+            );
+
+
+        const textIndex =
+            headers.indexOf(
+                "Email Text"
+            );
+
+
+        const typeIndex =
+            headers.indexOf(
+                "Email Type"
+            );
+
+
+        if (
+            textIndex === -1 ||
+            typeIndex === -1
+        ) {
+
+            throw new Error(
+                "Dataset must contain " +
+                "'Email Text' and 'Email Type' columns."
+            );
+
+        }
+
+
+        // ------------------------------------------------
+        // Separate Safe and Phishing emails
+        // ------------------------------------------------
+
+        const safeEmails = [];
+
+        const phishingEmails = [];
+
+
+        for (
+            let i = 1;
+            i < rows.length;
+            i++
+        ) {
+
+            const row =
+                rows[i];
+
+
+            if (
+                !row ||
+                row.length === 0
+            ) {
+
+                continue;
+
+            }
+
+
+            const emailText =
+                cleanCSVValue(
+                    row[textIndex]
+                );
+
+
+            const emailType =
+                normaliseEmailType(
+                    row[typeIndex]
+                );
+
+
+            if (!emailText) {
+
+                continue;
+
+            }
+
+
+            const email = {
+
+                text:
+                    emailText,
+
+                type:
+                    emailType
+
+            };
+
+
+            if (
+                emailType ===
+                "Phishing Email"
+            ) {
+
+                phishingEmails.push(
+                    email
+                );
+
+            }
+
+            else {
+
+                safeEmails.push(
+                    email
+                );
+
+            }
+
+        }
+
+
+        // ------------------------------------------------
+        // Check dataset balance
+        // ------------------------------------------------
+
+        if (
+            safeEmails.length <
+            NUMBER_OF_SAFE_EMAILS
+        ) {
+
+            throw new Error(
+                "The test dataset does not contain enough Safe Email records."
+            );
+
+        }
+
+
+        if (
+            phishingEmails.length <
+            NUMBER_OF_PHISHING_EMAILS
+        ) {
+
+            throw new Error(
+                "The test dataset does not contain enough Phishing Email records."
+            );
+
+        }
+
+
+        // ------------------------------------------------
+        // Reproducible random selection
+        // ------------------------------------------------
+
+        const shuffledSafe =
+            seededShuffle(
+                safeEmails,
+                RANDOM_SEED
+            );
+
+
+        const shuffledPhishing =
+            seededShuffle(
+                phishingEmails,
+                RANDOM_SEED + 1
+            );
+
+
+        const selectedSafe =
+            shuffledSafe.slice(
+                0,
+                NUMBER_OF_SAFE_EMAILS
+            );
+
+
+        const selectedPhishing =
+            shuffledPhishing.slice(
+                0,
+                NUMBER_OF_PHISHING_EMAILS
+            );
+
+
+        // ------------------------------------------------
+        // Create final 10-email test set
+        // Alternating:
+        // Phishing
+        // Safe
+        // Phishing
+        // Safe
+        // ------------------------------------------------
+
+        testEmails = [];
+
+
+        for (
+            let i = 0;
+            i < NUMBER_OF_PHISHING_EMAILS;
+            i++
+        ) {
+
+            testEmails.push({
+
+                text:
+                    selectedPhishing[i].text,
+
+                type:
+                    "Phishing Email",
+
+                testNumber:
+                    testEmails.length + 1
+
+            });
+
+
+            testEmails.push({
+
+                text:
+                    selectedSafe[i].text,
+
+                type:
+                    "Safe Email",
+
+                testNumber:
+                    testEmails.length + 1
+
+            });
+
+        }
+
+
+        // ------------------------------------------------
+        // Populate selector
+        // ------------------------------------------------
+
+        selector.innerHTML = "";
+
+
+        testEmails.forEach(
+            (email, index) => {
+
+                const option =
+                    document.createElement(
+                        "option"
+                    );
+
+
+                option.value =
+                    index;
+
+
+                option.textContent =
+                    `Test ${
+                        email.testNumber
+                    } - ${
+                        email.type
+                    }`;
+
+
+                selector.appendChild(
+                    option
+                );
+
+            }
+        );
+
+
+        // ------------------------------------------------
+        // Update status
+        // ------------------------------------------------
+
+        status.textContent =
+            `Held-out test dataset loaded successfully. ` +
+            `${rows.length - 1} rows available. ` +
+            `${testEmails.length} test emails selected ` +
+            `(${NUMBER_OF_SAFE_EMAILS} Safe + ${NUMBER_OF_PHISHING_EMAILS} Phishing, seed ${RANDOM_SEED}).`;
+
+
+        // ------------------------------------------------
+        // Display first email
+        // ------------------------------------------------
+
+        displayEmail(0);
+
+    }
+
+
+    catch (error) {
+
+        console.error(
+            error
+        );
+
+
+        status.style.display =
+            "none";
+
+
+        errorBox.style.display =
+            "block";
+
+
+        errorBox.textContent =
+            error.message;
+
+    }
+
+}
+
+
+// ============================================================
+// DISPLAY SELECTED EMAIL
+// ============================================================
+
+function displayEmail(index) {
+
+    const email =
+        testEmails[index];
+
+
+    if (!email) {
+
+        return;
+
+    }
+
+
+    // ------------------------------------------------
+    // Determine type
+    // ------------------------------------------------
+
+    const isPhishing =
+        email.type ===
+        "Phishing Email";
+
+
+    // ------------------------------------------------
+    // Synthetic sender
+    // ------------------------------------------------
+
+    const senderPrefix =
+        isPhishing
+            ? "security-alert"
+            : "student-services";
+
+
+    const sender =
+        `${senderPrefix}-${
+            email.testNumber
+        }@example.test`;
+
+
+    // ------------------------------------------------
+    // Synthetic subject
+    // ------------------------------------------------
+
+    const subject =
+        isPhishing
+            ? `Security Notification ${email.testNumber}`
+            : `University Services Update ${email.testNumber}`;
+
+
+    // ------------------------------------------------
+    // Update DOM
+    //
+    // These IDs are intentionally fixed because
+    // content.js reads them.
+    // ------------------------------------------------
+
+    emailFrom.textContent =
+        sender;
+
+
+    emailSubject.textContent =
+        subject;
+
+
+    emailBody.textContent =
+        email.text;
+
+
+    groundTruthLabel.textContent =
+        email.type;
+
+
+    // ------------------------------------------------
+    // Store current email as DOM data
+    // ------------------------------------------------
+
+    const container =
+        document.getElementById(
+            "emailContainer"
+        );
+
+
+    container.dataset.emailType =
+        email.type;
+
+
+    container.dataset.testNumber =
+        email.testNumber;
+
+
+    // ------------------------------------------------
+    // Make sure page is at top
+    // ------------------------------------------------
+
+    window.scrollTo(
+        0,
+        0
+    );
+
+
+    // ------------------------------------------------
+    // Console information
+    // ------------------------------------------------
+
+    console.log(
+        "=========================================="
+    );
+
+
+    console.log(
+        "CURRENT EMAIL UPDATED"
+    );
+
+
+    console.log(
+        "Test:",
+        email.testNumber
+    );
+
+
+    console.log(
+        "Type:",
+        email.type
+    );
+
+
+    console.log(
+        "Sender:",
+        sender
+    );
+
+
+    console.log(
+        "Subject:",
+        subject
+    );
+
+
+    console.log(
+        "=========================================="
+    );
+
+}
+
+
+// ============================================================
+// SELECT CHANGE
+// ============================================================
+
+selector.addEventListener(
+    "change",
+    function () {
+
+        const index =
+            Number(
+                selector.value
+            );
+
+
+        displayEmail(
+            index
+        );
+
+    }
+);
+
+
+// ============================================================
+// START
+// ============================================================
+
+loadDataset();
+
+
+</script>
+
+<script>
+(function(){
+  const list = document.getElementById("mailList");
+  const search = document.getElementById("searchBox");
+  let selectedIndex = 0;
+
+  function senderFor(email){
+    const phishing = email.type === "Phishing Email";
+    const prefix = phishing ? "security-alert" : "student-services";
+    return `${prefix}-${email.testNumber}@example.test`;
+  }
+  function subjectFor(email){
+    return email.type === "Phishing Email"
+      ? `Security Notification ${email.testNumber}`
+      : `University Services Update ${email.testNumber}`;
+  }
+  function renderReader(index){
+    const e = testEmails[index];
+    if(!e) return;
+    selectedIndex=index;
+    // Preserve original display/update logic and extension compatibility elements.
+    selector.value=String(index);
+    displayEmail(index);
+
+    const sender=senderFor(e), subject=subjectFor(e);
+    document.getElementById("from").textContent=sender;
+    document.getElementById("subjectTitle").textContent=subject;
+    document.getElementById("body").textContent=e.text;
+    document.getElementById("readerCounter").textContent=`Email ${index+1} of ${testEmails.length}`;
+    document.getElementById("avatar").textContent=(sender[0]||"E").toUpperCase();
+    const gt=document.getElementById("groundTruthBadge");
+    gt.textContent=`Ground truth: ${e.type}`;
+    gt.classList.toggle("phishing",e.type==="Phishing Email");
+    [...list.children].forEach((row,i)=>row.classList.toggle("selected",i===index));
+  }
+  function renderList(filter=""){
+    list.innerHTML="";
+    const q=filter.trim().toLowerCase();
+    testEmails.forEach((e,index)=>{
+      const sender=senderFor(e), subject=subjectFor(e);
+      if(q && !`${sender} ${subject} ${e.text}`.toLowerCase().includes(q)) return;
+      const row=document.createElement("div");
+      row.className="mail-row"+(index===selectedIndex?" selected":"");
+      const preview=e.text.replace(/\s+/g," ").trim();
+      row.innerHTML=`<div class="mail-row-top"><span>${sender}</span><span>Test ${e.testNumber}</span></div>
+        <div class="mail-row-subject">${subject}</div>
+        <div class="mail-row-preview">${preview}</div>`;
+      row.addEventListener("click",()=>renderReader(index));
+      list.appendChild(row);
+    });
+  }
+  search.addEventListener("input",()=>renderList(search.value));
+
+  // Wait for the original asynchronous CSV loader to finish.
+  const timer=setInterval(()=>{
+    if(Array.isArray(testEmails) && testEmails.length){
+      clearInterval(timer);
+      document.getElementById("inboxCount").textContent=testEmails.length;
+      document.getElementById("messageCount").textContent=`${testEmails.length} messages`;
+      document.getElementById("balanceText").textContent=
+        `${NUMBER_OF_SAFE_EMAILS} Safe + ${NUMBER_OF_PHISHING_EMAILS} Phishing`;
+      renderList();
+      renderReader(0);
+    }
+  },50);
+})();
+</script>
+
+</body>
+</html>
