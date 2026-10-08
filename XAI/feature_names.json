@@ -1,0 +1,14 @@
+[
+  "urgency_term_count",
+  "credential_term_count",
+  "threat_term_count",
+  "financial_term_count",
+  "cta_term_count",
+  "url_count",
+  "email_count",
+  "phone_count",
+  "exclamation_count",
+  "question_count",
+  "uppercase_word_ratio",
+  "log_text_length"
+]

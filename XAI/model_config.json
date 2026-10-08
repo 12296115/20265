@@ -1,0 +1,12 @@
+{
+  "model_name": "answerdotai/ModernBERT-large",
+  "num_features": 12,
+  "num_labels": 2,
+  "max_length": 512,
+  "context_dimension": 1024,
+  "context_projection_dimension": 256,
+  "feature_projection_dimension": 256,
+  "fusion_dimension": 256,
+  "architecture": "ModernBERT-large + 12 NLP features + gated fusion",
+  "random_seed": 42
+}
