@@ -1127,21 +1127,6 @@ if st.session_state.analysis_result is not None:
                 )
             )
 
-        if isinstance(
-            shap_indicators,
-            list
-        ) and shap_indicators:
-
-            st.write(
-                "#### 🛡️ Security Indicators Confirmed"
-            )
-
-            for indicator in shap_indicators:
-
-                st.warning(
-                    f"⚠️ {indicator}"
-                )
-
 
         # ====================================================
         # SHAP EXPLANATION NOTE
