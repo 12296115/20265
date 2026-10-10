@@ -1,18 +1,16 @@
 // ============================================================
-// University Phishing Email Detector
+// UNIVERSITY PHISHING EMAIL DETECTOR
 // content.js
 //
 // Supports:
-//   1. Webmail-style evaluation page
-//   2. Original dataset test page
-//   3. Browser-extension popup communication
-//   4. Direct in-page scanning
-//   5. FastAPI prediction
-//   6. SHAP explanations
+// 1. Webmail-style evaluation page
+// 2. Original dataset test page
+// 3. Browser-extension popup communication
+// 4. Direct in-page email scanning
+// 5. FastAPI prediction
+// 6. SHAP explanations
 //
-// IMPORTANT:
-// The browser extension does NOT run the ML model.
-// Classification and SHAP remain in the FastAPI backend.
+// Classification and SHAP run in the FastAPI backend.
 // ============================================================
 
 
@@ -43,22 +41,27 @@ if (!window.__universityPhishingDetectorLoaded) {
     initialiseDetector();
 }
 
-
 function initialiseDetector() {
+    let attempts = 0;
+    const maxAttempts = 10;
 
-    // Only inject the page button into the controlled
-    // local evaluation environment.
-    if (!isDatasetTestEnvironment()) {
-        return;
-    }
+    const start = () => {
+        if (isDatasetTestEnvironment()) {
+            createScanButton();
+            return;
+        }
+
+        attempts += 1;
+
+        if (attempts < maxAttempts) {
+            setTimeout(start, 500);
+        }
+    };
 
     if (document.readyState === "loading") {
-        document.addEventListener(
-            "DOMContentLoaded",
-            createScanButton
-        );
+        document.addEventListener("DOMContentLoaded", start);
     } else {
-        createScanButton();
+        start();
     }
 }
 
@@ -68,7 +71,6 @@ function initialiseDetector() {
 // ============================================================
 
 function isDatasetTestEnvironment() {
-
     const local =
         location.hostname === "localhost" ||
         location.hostname === "127.0.0.1";
@@ -77,7 +79,6 @@ function isDatasetTestEnvironment() {
         return false;
     }
 
-    // New webmail evaluation page.
     const webmailPage =
         document.getElementById("mailList") &&
         document.getElementById("subjectTitle") &&
@@ -88,7 +89,6 @@ function isDatasetTestEnvironment() {
         return true;
     }
 
-    // Original dataset test page.
     return [...document.querySelectorAll("h1,h2,h3")]
         .some(element =>
             normaliseText(element.textContent)
@@ -102,7 +102,6 @@ function isDatasetTestEnvironment() {
 // ============================================================
 
 function createScanButton() {
-
     if (document.getElementById(BUTTON_ID)) {
         return;
     }
@@ -129,11 +128,7 @@ function createScanButton() {
         boxShadow: "0 3px 10px rgba(0,0,0,.2)"
     });
 
-    button.addEventListener(
-        "click",
-        analyseCurrentEmail
-    );
-
+    button.addEventListener("click", analyseCurrentEmail);
     document.body.appendChild(button);
 }
 
@@ -143,153 +138,70 @@ function createScanButton() {
 // ============================================================
 
 async function analyseCurrentEmail() {
-
-    const button =
-        document.getElementById(BUTTON_ID);
+    const button = document.getElementById(BUTTON_ID);
 
     try {
-
-        setButtonLoading(
-            button,
-            true,
-            "⏳ Analysing Email..."
-        );
+        setButtonLoading(button, true, "⏳ Analysing Email...");
 
         removeElement(ERROR_ID);
         removeElement(RESULT_ID);
 
-        // Extract the currently displayed email.
         const email = extractEmail();
 
-        console.log(
-            "========== IN-PAGE EMAIL =========="
-        );
+        console.log("========== IN-PAGE EMAIL ==========");
+        console.log("Sender:", email.sender);
+        console.log("Subject:", email.subject);
+        console.log("Body length:", email.body ? email.body.length : 0);
+        console.log("Body:", email.body);
+        console.log("===================================");
 
-        console.log(
-            "Sender:",
-            email.sender
-        );
-
-        console.log(
-            "Subject:",
-            email.subject
-        );
-
-        console.log(
-            "Body length:",
-            email.body
-                ? email.body.length
-                : 0
-        );
-
-        console.log(
-            "Body:",
-            email.body
-        );
-
-        console.log(
-            "==================================="
-        );
-
-        if (
-            !email.body ||
-            !email.body.trim()
-        ) {
+        if (!email.body || !email.body.trim()) {
             throw new Error(
                 "Could not detect the selected email body."
             );
         }
 
-        // Send exactly sender + subject + body to FastAPI.
         const payload = {
             sender: email.sender || "",
             subject: email.subject || "",
             body: email.body || ""
         };
 
-        console.log(
-            "[Phishing Detector] Prediction payload:",
-            payload
-        );
-
-        const response = await fetch(
-            PREDICT_URL,
-            {
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify(payload)
-            }
-        );
+        const response = await fetch(PREDICT_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
 
         if (!response.ok) {
-
             throw new Error(
-                await readApiError(response) ||
+                (await readApiError(response)) ||
                 "Prediction API request failed. Make sure api.py is running."
             );
         }
 
-        const data =
-            await response.json();
+        const data = await response.json();
 
-        // Debugging:
-        // These RAW probabilities should be identical to
-        // those returned to popup.js for the same email.
-        console.log(
-            "========== IN-PAGE API RESULT =========="
-        );
+        console.log("========== IN-PAGE API RESULT ==========");
+        console.log("Prediction:", data.prediction);
+        console.log("Confidence raw:", data.confidence);
+        console.log("Safe probability raw:", data.safe_probability);
+        console.log("Phishing probability raw:", data.phishing_probability);
+        console.log("========================================");
 
-        console.log(
-            "Prediction:",
-            data.prediction
-        );
-
-        console.log(
-            "Confidence raw:",
-            data.confidence
-        );
-
-        console.log(
-            "Safe probability raw:",
-            data.safe_probability
-        );
-
-        console.log(
-            "Phishing probability raw:",
-            data.phishing_probability
-        );
-
-        console.log(
-            "========================================"
-        );
-
-        displayResult(
-            data,
-            email
-        );
+        displayResult(data, email);
 
     } catch (error) {
-
-        console.error(
-            "[Phishing Detector]",
-            error
-        );
+        console.error("[Phishing Detector]", error);
 
         showError(
-            error.message ||
-            "Unable to analyse this email."
+            error.message || "Unable to analyse this email."
         );
 
     } finally {
-
-        setButtonLoading(
-            button,
-            false
-        );
+        setButtonLoading(button, false);
     }
 }
 
@@ -298,32 +210,24 @@ async function analyseCurrentEmail() {
 // BUTTON LOADING STATE
 // ============================================================
 
-function setButtonLoading(
-    button,
-    loading,
-    text = ""
-) {
-
+function setButtonLoading(button, loading, text = "") {
     if (!button) {
         return;
     }
 
     button.disabled = loading;
 
-    button.textContent =
-        loading
-            ? text
-            : "🛡️ Scan Email for Phishing";
+    button.textContent = loading
+        ? text
+        : "🛡️ Scan Email for Phishing";
 
-    button.style.background =
-        loading
-            ? "#6b7280"
-            : "#2563eb";
+    button.style.background = loading
+        ? "#6b7280"
+        : "#2563eb";
 
-    button.style.cursor =
-        loading
-            ? "wait"
-            : "pointer";
+    button.style.cursor = loading
+        ? "wait"
+        : "pointer";
 }
 
 
@@ -333,21 +237,11 @@ function setButtonLoading(
 
 function extractEmail() {
 
-    // ========================================================
-    // METHOD 1:
-    // WEBMAIL EVALUATION PAGE
-    // ========================================================
+    // METHOD 1: WEBMAIL EVALUATION PAGE
 
-    const webmailFrom =
-        document.getElementById("from");
-
-    const webmailSubject =
-        document.getElementById(
-            "subjectTitle"
-        );
-
-    const webmailBody =
-        document.getElementById("body");
+    const webmailFrom = document.getElementById("from");
+    const webmailSubject = document.getElementById("subjectTitle");
+    const webmailBody = document.getElementById("body");
 
     if (
         webmailFrom &&
@@ -355,26 +249,21 @@ function extractEmail() {
         webmailBody &&
         isVisible(webmailBody)
     ) {
+        const sender = normaliseText(
+            webmailFrom.textContent || ""
+        );
 
-        const sender =
-            normaliseText(
-                webmailFrom.textContent || ""
-            );
+        const subject = normaliseText(
+            webmailSubject.textContent || ""
+        );
 
-        const subject =
-            normaliseText(
-                webmailSubject.textContent || ""
-            );
-
-        const body =
-            cleanEmailBody(
-                webmailBody.innerText ||
-                webmailBody.textContent ||
-                ""
-            );
+        const body = cleanEmailBody(
+            webmailBody.innerText ||
+            webmailBody.textContent ||
+            ""
+        );
 
         if (body) {
-
             console.log(
                 "[Phishing Detector] Webmail email detected.",
                 {
@@ -384,24 +273,15 @@ function extractEmail() {
                 }
             );
 
-            return {
-                sender,
-                subject,
-                body
-            };
+            return { sender, subject, body };
         }
     }
 
-    // ========================================================
-    // METHOD 2:
-    // ORIGINAL DATASET TEST PAGE
-    // ========================================================
+    // METHOD 2: ORIGINAL DATASET TEST PAGE
 
-    const card =
-        getVisibleEmailCard();
+    const card = getVisibleEmailCard();
 
     if (!card) {
-
         console.warn(
             "[Phishing Detector] No supported email container detected."
         );
@@ -413,22 +293,11 @@ function extractEmail() {
         };
     }
 
-    const sender =
-        extractLabelValue(
-            card,
-            "From:"
-        );
-
-    const subject =
-        extractLabelValue(
-            card,
-            "Subject:"
-        );
-
-    const body =
-        cleanEmailBody(
-            extractBodyFromCard(card)
-        );
+    const sender = extractLabelValue(card, "From:");
+    const subject = extractLabelValue(card, "Subject:");
+    const body = cleanEmailBody(
+        extractBodyFromCard(card)
+    );
 
     console.log(
         "[Phishing Detector] Dataset email detected.",
@@ -439,11 +308,7 @@ function extractEmail() {
         }
     );
 
-    return {
-        sender,
-        subject,
-        body
-    };
+    return { sender, subject, body };
 }
 
 
@@ -452,36 +317,22 @@ function extractEmail() {
 // ============================================================
 
 function getVisibleEmailCard() {
-
-    const heading =
-        [...document.querySelectorAll(
-            "h1,h2,h3"
-        )]
-            .find(element =>
-                isVisible(element) &&
-                normaliseText(
-                    element.textContent
-                ).toLowerCase() ===
-                    "university email"
-            );
+    const heading = [
+        ...document.querySelectorAll("h1,h2,h3")
+    ].find(element =>
+        isVisible(element) &&
+        normaliseText(element.textContent)
+            .toLowerCase() === "university email"
+    );
 
     if (!heading) {
         return null;
     }
 
-    let element =
-        heading.parentElement;
+    let element = heading.parentElement;
 
-    for (
-        let i = 0;
-        i < 8 && element;
-        i++
-    ) {
-
-        const text =
-            normaliseText(
-                element.innerText
-            );
+    for (let i = 0; i < 8 && element; i++) {
+        const text = normaliseText(element.innerText);
 
         if (
             text.length > 100 &&
@@ -491,8 +342,7 @@ function getVisibleEmailCard() {
             return element;
         }
 
-        element =
-            element.parentElement;
+        element = element.parentElement;
     }
 
     return heading.parentElement;
@@ -503,40 +353,28 @@ function getVisibleEmailCard() {
 // EXTRACT LABEL VALUE
 // ============================================================
 
-function extractLabelValue(
-    container,
-    label
-) {
-
+function extractLabelValue(container, label) {
     for (
-        const element
-        of container.querySelectorAll(
+        const element of container.querySelectorAll(
             "p,div,span,strong,b"
         )
     ) {
-
         if (!isVisible(element)) {
             continue;
         }
 
-        const text =
-            normaliseText(
-                element.innerText ||
-                element.textContent
-            );
+        const text = normaliseText(
+            element.innerText ||
+            element.textContent
+        );
 
         if (
-            text
-                .toLowerCase()
-                .startsWith(
-                    label.toLowerCase()
-                ) &&
+            text.toLowerCase().startsWith(
+                label.toLowerCase()
+            ) &&
             text.length > label.length
         ) {
-
-            return text
-                .slice(label.length)
-                .trim();
+            return text.slice(label.length).trim();
         }
     }
 
@@ -549,9 +387,7 @@ function extractLabelValue(
 // ============================================================
 
 function extractBodyFromCard(card) {
-
-    const clone =
-        card.cloneNode(true);
+    const clone = card.cloneNode(true);
 
     clone.querySelectorAll(
         "h1,h2,h3," +
@@ -559,10 +395,7 @@ function extractBodyFromCard(card) {
         ".header," +
         "[class*='ground']," +
         "[id*='ground']"
-    ).forEach(
-        element =>
-            element.remove()
-    );
+    ).forEach(element => element.remove());
 
     return removeMetadata(
         clone.innerText ||
@@ -577,30 +410,16 @@ function extractBodyFromCard(card) {
 // ============================================================
 
 function removeMetadata(text) {
-
-    return String(
-        text || ""
-    )
-        .replace(
-            /\r/g,
-            ""
-        )
+    return String(text || "")
+        .replace(/\r/g, "")
         .split("\n")
-        .map(
-            line =>
-                line.trim()
-        )
-        .filter(
-            line =>
-                line &&
-                !/^University Email$/i
-                    .test(line) &&
-                !/^From:/i
-                    .test(line) &&
-                !/^Subject:/i
-                    .test(line) &&
-                !/^Dataset ground truth:/i
-                    .test(line)
+        .map(line => line.trim())
+        .filter(line =>
+            line &&
+            !/^University Email$/i.test(line) &&
+            !/^From:/i.test(line) &&
+            !/^Subject:/i.test(line) &&
+            !/^Dataset ground truth:/i.test(line)
         )
         .join("\n");
 }
@@ -611,10 +430,7 @@ function removeMetadata(text) {
 // ============================================================
 
 function cleanEmailBody(text) {
-
-    return removeMetadata(
-        text
-    ).trim();
+    return removeMetadata(text).trim();
 }
 
 
@@ -623,14 +439,8 @@ function cleanEmailBody(text) {
 // ============================================================
 
 function normaliseText(text) {
-
-    return String(
-        text || ""
-    )
-        .replace(
-            /\s+/g,
-            " "
-        )
+    return String(text || "")
+        .replace(/\s+/g, " ")
         .trim();
 }
 
@@ -640,20 +450,16 @@ function normaliseText(text) {
 // ============================================================
 
 function isVisible(element) {
-
     if (!element) {
         return false;
     }
 
-    const style =
-        getComputedStyle(element);
+    const style = getComputedStyle(element);
 
     return (
         style.display !== "none" &&
         style.visibility !== "hidden" &&
-        element
-            .getClientRects()
-            .length > 0
+        element.getClientRects().length > 0
     );
 }
 
@@ -662,297 +468,162 @@ function isVisible(element) {
 // DISPLAY CLASSIFICATION RESULT
 // ============================================================
 
-function displayResult(
-    data,
-    email
-) {
+function displayResult(data, email) {
+    removeElement(RESULT_ID);
 
-    removeElement(
-        RESULT_ID
-    );
+    const isPhishing = String(
+        data.prediction || ""
+    ).toLowerCase().includes("phishing");
 
-    const isPhishing =
-        String(
-            data.prediction || ""
-        )
-            .toLowerCase()
-            .includes("phishing");
+    const container = document.createElement("div");
 
-    const container =
-        document.createElement(
-            "div"
-        );
+    container.id = RESULT_ID;
 
-    container.id =
-        RESULT_ID;
+    Object.assign(container.style, {
+        position: "fixed",
+        top: "78px",
+        right: "20px",
+        width: "360px",
+        maxHeight: "calc(100vh - 100px)",
+        overflowY: "auto",
+        zIndex: "2147483647",
+        background: "#fff",
+        border: isPhishing
+            ? "1px solid #dc2626"
+            : "1px solid #16a34a",
+        borderRadius: "10px",
+        boxShadow: "0 8px 25px rgba(0,0,0,.2)",
+        padding: "16px",
+        fontFamily: "Arial, sans-serif",
+        color: "#172b4d"
+    });
 
-    Object.assign(
-        container.style,
-        {
-            position: "fixed",
-            top: "78px",
-            right: "20px",
-            width: "360px",
-            maxHeight:
-                "calc(100vh - 100px)",
-            overflowY: "auto",
-            zIndex:
-                "2147483647",
-            background: "#fff",
-
-            border:
-                isPhishing
-                    ? "1px solid #dc2626"
-                    : "1px solid #16a34a",
-
-            borderRadius: "10px",
-
-            boxShadow:
-                "0 8px 25px rgba(0,0,0,.2)",
-
-            padding: "16px",
-
-            fontFamily:
-                "Arial, sans-serif",
-
-            color: "#172b4d"
-        }
-    );
-
-
-    // --------------------------------------------------------
     // RESULT HEADER
-    // --------------------------------------------------------
 
-    const header =
-        document.createElement(
-            "div"
-        );
+    const header = document.createElement("div");
 
-    Object.assign(
-        header.style,
-        {
-            display: "flex",
-            justifyContent:
-                "space-between",
-            alignItems:
-                "center"
-        }
-    );
+    Object.assign(header.style, {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+    });
 
-    const title =
-        document.createElement(
-            "strong"
-        );
+    const title = document.createElement("strong");
 
-    title.textContent =
-        isPhishing
-            ? "⚠️ Potential Phishing Email"
-            : "✅ Safe Email";
+    title.textContent = isPhishing
+        ? "⚠️ Potential Phishing Email"
+        : "✅ Safe Email";
 
-    title.style.color =
-        isPhishing
-            ? "#b91c1c"
-            : "#15803d";
+    title.style.color = isPhishing
+        ? "#b91c1c"
+        : "#15803d";
 
-    title.style.fontSize =
-        "16px";
+    title.style.fontSize = "16px";
 
-    const close =
-        document.createElement(
-            "button"
-        );
+    const close = document.createElement("button");
 
-    close.textContent =
-        "×";
+    close.textContent = "×";
 
-    Object.assign(
-        close.style,
-        {
-            border: "none",
-            background:
-                "transparent",
-            fontSize: "20px",
-            cursor: "pointer",
-            color: "#6b7280"
-        }
-    );
+    Object.assign(close.style, {
+        border: "none",
+        background: "transparent",
+        fontSize: "20px",
+        cursor: "pointer",
+        color: "#6b7280"
+    });
 
-    close.onclick =
-        () =>
-            container.remove();
+    close.onclick = () => container.remove();
 
-    header.append(
-        title,
-        close
-    );
+    header.append(title, close);
+    container.appendChild(header);
 
-    container.appendChild(
-        header
-    );
-
-
-    // --------------------------------------------------------
     // CONFIDENCE
-    // --------------------------------------------------------
-    //
-    // IMPORTANT:
-    // Use ONLY raw 0–1 probability values from FastAPI.
-    // Do NOT use confidence_percentage here.
-    // --------------------------------------------------------
 
     appendText(
         container,
-
-        `Confidence: ${formatRawProbability(
-            data.confidence
-        )}`,
-
+        `Confidence: ${formatRawProbability(data.confidence)}`,
         {
-            margin:
-                "10px 0 5px",
-            fontSize:
-                "13px"
+            margin: "10px 0 5px",
+            fontSize: "13px"
         }
     );
 
-
-    // --------------------------------------------------------
     // CLASS PROBABILITIES
-    // --------------------------------------------------------
-    //
-    // Again, use only the raw values:
-    //
-    // safe_probability
-    // phishing_probability
-    //
-    // 0.0063 becomes 0.63%.
-    // 0.6400 becomes 64.00%.
-    // --------------------------------------------------------
 
     appendText(
         container,
-
-        `Safe: ${formatRawProbability(
-            data.safe_probability
-        )} | ` +
-
-        `Phishing: ${formatRawProbability(
-            data.phishing_probability
-        )}`,
-
+        `Safe: ${formatRawProbability(data.safe_probability)} | ` +
+        `Phishing: ${formatRawProbability(data.phishing_probability)}`,
         {
             margin: "4px 0",
             fontSize: "12px"
         }
     );
 
-
-    // --------------------------------------------------------
     // SUPPLEMENTARY SECURITY INDICATORS
-    // --------------------------------------------------------
 
-    const indicators =
-        Array.isArray(
-            data.indicators
-        )
-            ? data.indicators
-            : [];
+    const indicators = Array.isArray(data.indicators)
+        ? data.indicators
+        : [];
 
     if (indicators.length) {
+        appendText(container, "Detected Indicators:", {
+            marginTop: "10px",
+            fontSize: "13px",
+            fontWeight: "bold"
+        });
 
-        appendText(
-            container,
-            "Detected Indicators:",
-            {
-                marginTop: "10px",
-                fontSize: "13px",
-                fontWeight: "bold"
-            }
-        );
-
-        indicators.forEach(
-            indicator => {
-
-                appendText(
-                    container,
-                    `⚠️ ${indicator}`,
-                    {
-                        marginTop: "6px",
-                        padding: "7px",
-                        background:
-                            "#fef3c7",
-                        color:
-                            "#92400e",
-                        borderRadius:
-                            "5px",
-                        fontSize:
-                            "11px"
-                    }
-                );
-            }
-        );
+        indicators.forEach(indicator => {
+            appendText(
+                container,
+                `⚠️ ${indicator}`,
+                {
+                    marginTop: "6px",
+                    padding: "7px",
+                    background: "#fef3c7",
+                    color: "#92400e",
+                    borderRadius: "5px",
+                    fontSize: "11px"
+                }
+            );
+        });
     }
 
-
-    // --------------------------------------------------------
     // EXTRACTED EMAIL DETAILS
-    // --------------------------------------------------------
 
-    const details =
-        document.createElement(
-            "div"
-        );
+    const details = document.createElement("div");
 
-    Object.assign(
-        details.style,
-        {
-            marginTop: "12px",
-            paddingTop: "10px",
-            borderTop:
-                "1px solid #e5e7eb",
-            fontSize: "11px",
-            lineHeight: "1.6"
-        }
-    );
+    Object.assign(details.style, {
+        marginTop: "12px",
+        paddingTop: "10px",
+        borderTop: "1px solid #e5e7eb",
+        fontSize: "11px",
+        lineHeight: "1.6"
+    });
 
     appendDetail(
         details,
         "Sender",
-        email.sender ||
-            "Not detected"
+        email.sender || "Not detected"
     );
 
     appendDetail(
         details,
         "Subject",
-        email.subject ||
-            "Not detected"
+        email.subject || "Not detected"
     );
 
-    container.appendChild(
-        details
-    );
+    container.appendChild(details);
 
-
-    // ========================================================
     // EXPLAINABLE AI
-    // ========================================================
 
-    const explainSection =
-        document.createElement(
-            "div"
-        );
+    const explainSection = document.createElement("div");
 
-    Object.assign(
-        explainSection.style,
-        {
-            marginTop: "14px",
-            paddingTop: "12px",
-            borderTop:
-                "1px solid #e5e7eb"
-        }
-    );
+    Object.assign(explainSection.style, {
+        marginTop: "14px",
+        paddingTop: "12px",
+        borderTop: "1px solid #e5e7eb"
+    });
 
     appendText(
         explainSection,
@@ -975,77 +646,53 @@ function displayResult(
         }
     );
 
-    const output =
-        document.createElement(
-            "div"
+    const output = document.createElement("div");
+    output.style.marginTop = "10px";
+
+    const explainButton = document.createElement("button");
+
+    explainButton.textContent = "🧠 Explain Decision";
+
+    Object.assign(explainButton.style, {
+        background: "#fff",
+        color: "#374151",
+        border: "1px solid #cbd5e1",
+        borderRadius: "6px",
+        padding: "8px 12px",
+        fontSize: "12px",
+        fontWeight: "bold",
+        cursor: "pointer"
+    });
+
+    explainButton.onclick = () =>
+        generateExplanation(
+            explainButton,
+            output,
+            email
         );
-
-    output.style.marginTop =
-        "10px";
-
-    const explainButton =
-        document.createElement(
-            "button"
-        );
-
-    explainButton.textContent =
-        "🧠 Explain Decision";
-
-    Object.assign(
-        explainButton.style,
-        {
-            background: "#fff",
-            color: "#374151",
-            border:
-                "1px solid #cbd5e1",
-            borderRadius: "6px",
-            padding: "8px 12px",
-            fontSize: "12px",
-            fontWeight: "bold",
-            cursor: "pointer"
-        }
-    );
-
-    explainButton.onclick =
-        () =>
-            generateExplanation(
-                explainButton,
-                output,
-                email
-            );
 
     explainSection.append(
         explainButton,
         output
     );
 
-    container.appendChild(
-        explainSection
-    );
+    container.appendChild(explainSection);
 
-
-    // --------------------------------------------------------
     // MODEL INFORMATION
-    // --------------------------------------------------------
 
     appendText(
         container,
-
         "Powered by DeBERTa-v3-large + SHAP Explainable AI",
-
         {
             marginTop: "14px",
             paddingTop: "10px",
-            borderTop:
-                "1px solid #e5e7eb",
+            borderTop: "1px solid #e5e7eb",
             fontSize: "10px",
             color: "#9ca3af"
         }
     );
 
-    document.body.appendChild(
-        container
-    );
+    document.body.appendChild(container);
 }
 
 
@@ -1053,64 +700,35 @@ function displayResult(
 // GENERATE SHAP EXPLANATION
 // ============================================================
 
-async function generateExplanation(
-    button,
-    output,
-    email
-) {
-
-    output.innerHTML =
-        "";
+async function generateExplanation(button, output, email) {
+    output.innerHTML = "";
 
     try {
+        button.disabled = true;
+        button.textContent = "⏳ Generating Explanation...";
+        button.style.background = "#e5e7eb";
+        button.style.cursor = "wait";
 
-        button.disabled =
-            true;
-
-        button.textContent =
-            "⏳ Generating Explanation...";
-
-        button.style.background =
-            "#e5e7eb";
-
-        button.style.cursor =
-            "wait";
-
-        const response =
-            await fetch(
-                EXPLAIN_URL,
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify({
-                            sender:
-                                email.sender || "",
-                            subject:
-                                email.subject || "",
-                            body:
-                                email.body || ""
-                        })
-                }
-            );
+        const response = await fetch(EXPLAIN_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                sender: email.sender || "",
+                subject: email.subject || "",
+                body: email.body || ""
+            })
+        });
 
         if (!response.ok) {
-
             throw new Error(
-                await readApiError(
-                    response
-                ) ||
+                (await readApiError(response)) ||
                 "Unable to generate the SHAP explanation."
             );
         }
 
-        const explanationData =
-            await response.json();
+        const explanationData = await response.json();
 
         displayExplanation(
             output,
@@ -1118,7 +736,6 @@ async function generateExplanation(
         );
 
     } catch (error) {
-
         console.error(
             "SHAP explanation error:",
             error
@@ -1126,40 +743,24 @@ async function generateExplanation(
 
         appendText(
             output,
-
             `Unable to generate SHAP explanation: ${
-                error.message ||
-                "Unknown error"
+                error.message || "Unknown error"
             }`,
-
             {
                 padding: "9px",
-                background:
-                    "#fee2e2",
-                color:
-                    "#991b1b",
-                borderRadius:
-                    "6px",
-                fontSize:
-                    "11px",
-                lineHeight:
-                    "1.4"
+                background: "#fee2e2",
+                color: "#991b1b",
+                borderRadius: "6px",
+                fontSize: "11px",
+                lineHeight: "1.4"
             }
         );
 
     } finally {
-
-        button.disabled =
-            false;
-
-        button.textContent =
-            "🧠 Explain Decision";
-
-        button.style.background =
-            "#fff";
-
-        button.style.cursor =
-            "pointer";
+        button.disabled = false;
+        button.textContent = "🧠 Explain Decision";
+        button.style.background = "#fff";
+        button.style.cursor = "pointer";
     }
 }
 
@@ -1168,72 +769,57 @@ async function generateExplanation(
 // DISPLAY SHAP EXPLANATION
 // ============================================================
 
-function displayExplanation(
-    output,
-    data
-) {
-
-    output.innerHTML =
-        "";
+function displayExplanation(output, data) {
+    output.innerHTML = "";
 
     appendText(
         output,
-
         "✅ SHAP explanation generated successfully.",
-
         {
             padding: "8px",
-            background:
-                "#dcfce7",
-            color:
-                "#166534",
-            borderRadius:
-                "6px",
-            fontSize:
-                "11px",
-            marginBottom:
-                "10px"
+            background: "#dcfce7",
+            color: "#166534",
+            borderRadius: "6px",
+            fontSize: "11px",
+            marginBottom: "10px"
         }
     );
 
     appendText(
         output,
-
         `Explanation for: ${
             data.prediction ||
             data.label ||
             "Model Prediction"
         }`,
-
         {
             fontSize: "13px",
             fontWeight: "bold",
-            marginBottom:
-                "10px"
+            marginBottom: "10px"
         }
     );
 
-    const supporting =
-        getFactorArray(
-            data,
-            [
-                "supporting_factors",
-                "top_supporting_factors",
-                "factors_supporting",
-                "positive_factors"
-            ]
-        );
+    // --------------------------------------------------------
+    // FACTORS SUPPORTING THE PREDICTION
+    // --------------------------------------------------------
 
-    const opposing =
-        getFactorArray(
-            data,
-            [
-                "opposing_factors",
-                "top_opposing_factors",
-                "factors_against",
-                "negative_factors"
-            ]
-        );
+    const supporting = getFactorArray(data, [
+        "supporting_factors",
+        "top_supporting_factors",
+        "factors_supporting",
+        "positive_factors"
+    ]);
+
+    // --------------------------------------------------------
+    // FACTORS WORKING AGAINST THE PREDICTION
+    // --------------------------------------------------------
+
+    const opposing = getFactorArray(data, [
+        "opposing_factors",
+        "top_opposing_factors",
+        "factors_against",
+        "negative_factors"
+    ]);
 
     appendFactorSection(
         output,
@@ -1253,11 +839,49 @@ function displayExplanation(
         "No strong opposing factors were identified."
     );
 
+    // ========================================================
+    // STRONGEST SHAP FACTORS
+    // ========================================================
+
+    // Use the same factors already returned by FastAPI.
+    // Exclude entries with missing or invalid contributions.
+    // Rank by absolute SHAP magnitude, preserving the sign.
+
+    const strongestFactors = [
+        ...supporting,
+        ...opposing
+    ]
+        .filter(factor =>
+            getFactorContribution(factor) !== null
+        )
+        .sort((a, b) =>
+            Math.abs(getFactorContribution(b)) -
+            Math.abs(getFactorContribution(a))
+        )
+        .slice(0, 10);
+
+    appendFactorSection(
+        output,
+        "🔍 Strongest SHAP Factors",
+        strongestFactors,
+        "#dbeafe",
+        "#1e40af",
+        "No SHAP factors were available.",
+        true
+    );
+
+    // ========================================================
+    // SHAP EXPLANATION NOTE
+    // ========================================================
+
     appendText(
         output,
-
-        "SHAP contributions show how individual words and tokens influenced the model's prediction.",
-
+        "Positive SHAP contributions support the explained " +
+        "classification, while negative contributions work " +
+        "against it. The strongest factors are ranked by " +
+        "absolute SHAP contribution and include both " +
+        "supporting and opposing influences. " +
+        "SHAP explanations do not change the model's prediction.",
         {
             marginTop: "10px",
             fontSize: "10px",
@@ -1272,20 +896,9 @@ function displayExplanation(
 // GET FACTOR ARRAY
 // ============================================================
 
-function getFactorArray(
-    data,
-    keys
-) {
-
-    for (
-        const key of keys
-    ) {
-
-        if (
-            Array.isArray(
-                data[key]
-            )
-        ) {
+function getFactorArray(data, keys) {
+    for (const key of keys) {
+        if (Array.isArray(data[key])) {
             return data[key];
         }
     }
@@ -1304,16 +917,12 @@ function appendFactorSection(
     factors,
     background,
     colour,
-    emptyMessage
+    emptyMessage,
+    showDirection = false
 ) {
+    const section = document.createElement("div");
 
-    const section =
-        document.createElement(
-            "div"
-        );
-
-    section.style.marginTop =
-        "12px";
+    section.style.marginTop = "12px";
 
     appendText(
         section,
@@ -1327,7 +936,6 @@ function appendFactorSection(
     );
 
     if (!factors.length) {
-
         appendText(
             section,
             emptyMessage,
@@ -1339,63 +947,53 @@ function appendFactorSection(
                 fontSize: "10px"
             }
         );
-
     } else {
+        const list = document.createElement("ol");
 
-        const list =
-            document.createElement(
-                "ol"
-            );
+        Object.assign(list.style, {
+            margin: "0",
+            paddingLeft: "20px",
+            fontSize: "11px",
+            lineHeight: "1.8"
+        });
 
-        Object.assign(
-            list.style,
-            {
-                margin: "0",
-                paddingLeft: "20px",
-                fontSize: "11px",
-                lineHeight: "1.8"
-            }
-        );
+        factors.slice(0, 10).forEach(factor => {
+            const token = getFactorToken(factor);
+            const contribution = getFactorContribution(factor);
 
-        factors
-            .slice(0, 10)
-            .forEach(
-                factor => {
+            const item = document.createElement("li");
 
-                    const token =
-                        getFactorToken(
-                            factor
-                        );
+            if (contribution === null) {
+                item.textContent = token;
+            } else {
+                const formattedContribution =
+                    contribution >= 0
+                        ? `+${contribution.toFixed(6)}`
+                        : contribution.toFixed(6);
 
-                    const contribution =
-                        getFactorContribution(
-                            factor
-                        );
-
-                    const item =
-                        document.createElement(
-                            "li"
-                        );
+                if (showDirection) {
+                    const direction =
+                        contribution >= 0
+                            ? "supports prediction"
+                            : "works against prediction";
 
                     item.textContent =
-                        contribution === null
-                            ? token
-                            : `${token} → Contribution: ${contribution.toFixed(6)}`;
-
-                    list.appendChild(
-                        item
-                    );
+                        `${token} → ${formattedContribution} ` +
+                        `(${direction})`;
+                } else {
+                    item.textContent =
+                        `${token} → Contribution: ` +
+                        `${contribution.toFixed(6)}`;
                 }
-            );
+            }
 
-        section.appendChild(
-            list
-        );
+            list.appendChild(item);
+        });
+
+        section.appendChild(list);
     }
 
-    output.appendChild(
-        section
-    );
+    output.appendChild(section);
 }
 
 
@@ -1403,22 +1001,12 @@ function appendFactorSection(
 // GET SHAP TOKEN
 // ============================================================
 
-function getFactorToken(
-    factor
-) {
-
-    if (
-        typeof factor ===
-        "string"
-    ) {
+function getFactorToken(factor) {
+    if (typeof factor === "string") {
         return factor;
     }
 
-    if (
-        !factor ||
-        typeof factor !==
-            "object"
-    ) {
+    if (!factor || typeof factor !== "object") {
         return "Unknown token";
     }
 
@@ -1436,28 +1024,27 @@ function getFactorToken(
 // GET SHAP CONTRIBUTION
 // ============================================================
 
-function getFactorContribution(
-    factor
-) {
+function getFactorContribution(factor) {
+    if (!factor || typeof factor !== "object") {
+        return null;
+    }
+
+    const raw =
+        factor.contribution ??
+        factor.shap_value ??
+        factor.value;
 
     if (
-        !factor ||
-        typeof factor !==
-            "object"
+        raw === null ||
+        raw === undefined ||
+        raw === ""
     ) {
         return null;
     }
 
-    const number =
-        Number(
-            factor.contribution ??
-            factor.shap_value ??
-            factor.value
-        );
+    const number = Number(raw);
 
-    return Number.isFinite(
-        number
-    )
+    return Number.isFinite(number)
         ? number
         : null;
 }
@@ -1467,28 +1054,14 @@ function getFactorContribution(
 // GENERIC TEXT ELEMENT
 // ============================================================
 
-function appendText(
-    parent,
-    text,
-    styles = {}
-) {
+function appendText(parent, text, styles = {}) {
+    const element = document.createElement("div");
 
-    const element =
-        document.createElement(
-            "div"
-        );
+    element.textContent = text;
 
-    element.textContent =
-        text;
+    Object.assign(element.style, styles);
 
-    Object.assign(
-        element.style,
-        styles
-    );
-
-    parent.appendChild(
-        element
-    );
+    parent.appendChild(element);
 
     return element;
 }
@@ -1498,75 +1071,32 @@ function appendText(
 // EMAIL DETAIL ROW
 // ============================================================
 
-function appendDetail(
-    parent,
-    label,
-    value
-) {
+function appendDetail(parent, label, value) {
+    const row = document.createElement("div");
 
-    const row =
-        document.createElement(
-            "div"
-        );
+    const strong = document.createElement("strong");
+    strong.textContent = `${label}: `;
 
-    const strong =
-        document.createElement(
-            "strong"
-        );
+    const text = document.createElement("span");
+    text.textContent = value;
 
-    strong.textContent =
-        `${label}: `;
-
-    const text =
-        document.createElement(
-            "span"
-        );
-
-    text.textContent =
-        value;
-
-    row.append(
-        strong,
-        text
-    );
-
-    parent.appendChild(
-        row
-    );
+    row.append(strong, text);
+    parent.appendChild(row);
 }
 
 
 // ============================================================
 // RAW PROBABILITY FORMATTER
 // ============================================================
-//
-// FastAPI raw probabilities are expected to be between 0 and 1.
-//
-// Examples:
-//
-// 0.0063 -> 0.63%
-// 0.64   -> 64.00%
-// 0.9937 -> 99.37%
-//
-// This function ALWAYS performs exactly one conversion.
-// ============================================================
 
-function formatRawProbability(
-    value
-) {
+function formatRawProbability(value) {
+    const number = Number(value);
 
-    const number =
-        Number(value);
-
-    if (
-        !Number.isFinite(number)
-    ) {
+    if (!Number.isFinite(number)) {
         return "N/A";
     }
 
-    return `${
-        (number * 100).toFixed(2)
-    }%`;
+    return `${(number * 100).toFixed(2)}%`;
 }
 
 
@@ -1575,11 +1105,7 @@ function formatRawProbability(
 // ============================================================
 
 function removeElement(id) {
-
-    const element =
-        document.getElementById(
-            id
-        );
+    const element = document.getElementById(id);
 
     if (element) {
         element.remove();
@@ -1591,24 +1117,21 @@ function removeElement(id) {
 // READ FASTAPI ERROR
 // ============================================================
 
-async function readApiError(
-    response
-) {
-
+async function readApiError(response) {
     try {
+        const data = await response.json();
 
-        const data =
-            await response.json();
-
-        return (
+        const detail =
             data.detail ||
             data.message ||
             data.error ||
-            ""
-        );
+            "";
+
+        return typeof detail === "string"
+            ? detail
+            : JSON.stringify(detail);
 
     } catch {
-
         return "";
     }
 }
@@ -1619,143 +1142,72 @@ async function readApiError(
 // ============================================================
 
 function showError(message) {
+    removeElement(ERROR_ID);
 
-    removeElement(
-        ERROR_ID
-    );
+    const error = document.createElement("div");
 
-    const error =
-        document.createElement(
-            "div"
-        );
+    error.id = ERROR_ID;
+    error.textContent = `⚠️ ${message}`;
 
-    error.id =
-        ERROR_ID;
+    Object.assign(error.style, {
+        position: "fixed",
+        top: "78px",
+        right: "20px",
+        width: "340px",
+        zIndex: "2147483647",
+        background: "#fee2e2",
+        color: "#991b1b",
+        border: "1px solid #dc2626",
+        borderRadius: "8px",
+        padding: "14px",
+        fontFamily: "Arial, sans-serif",
+        fontSize: "13px",
+        boxShadow: "0 5px 15px rgba(0,0,0,.15)"
+    });
 
-    error.textContent =
-        `⚠️ ${message}`;
+    document.body.appendChild(error);
 
-    Object.assign(
-        error.style,
-        {
-            position: "fixed",
-            top: "78px",
-            right: "20px",
-            width: "340px",
-            zIndex:
-                "2147483647",
-            background:
-                "#fee2e2",
-            color:
-                "#991b1b",
-            border:
-                "1px solid #dc2626",
-            borderRadius:
-                "8px",
-            padding:
-                "14px",
-            fontFamily:
-                "Arial, sans-serif",
-            fontSize:
-                "13px",
-            boxShadow:
-                "0 5px 15px rgba(0,0,0,.15)"
+    setTimeout(() => {
+        if (document.body.contains(error)) {
+            error.remove();
         }
-    );
-
-    document.body.appendChild(
-        error
-    );
-
-    setTimeout(
-        () => {
-
-            if (
-                document.body.contains(
-                    error
-                )
-            ) {
-                error.remove();
-            }
-
-        },
-        6000
-    );
+    }, 6000);
 }
 
 
 // ============================================================
 // POPUP COMMUNICATION
 // ============================================================
-//
+
 // popup.js sends:
+// { action: "getEmail" }
 //
-//     { action: "getEmail" }
-//
-// IMPORTANT:
-// This calls the SAME extractEmail() function used by the
-// webpage Scan button. Therefore both interfaces receive the
-// same sender, subject and body.
-// ============================================================
+// The popup and injected scan button use the same
+// extractEmail() function.
 
 chrome.runtime.onMessage.addListener(
-    (
-        request,
-        sender,
-        sendResponse
-    ) => {
-
-        if (
-            request.action !==
-            "getEmail"
-        ) {
+    (request, sender, sendResponse) => {
+        if (request.action !== "getEmail") {
             return;
         }
 
         try {
+            const email = extractEmail();
 
-            const email =
-                extractEmail();
-
-            console.log(
-                "========== POPUP EXTRACTION =========="
-            );
-
-            console.log(
-                "Sender:",
-                email.sender
-            );
-
-            console.log(
-                "Subject:",
-                email.subject
-            );
-
+            console.log("========== POPUP EXTRACTION ==========");
+            console.log("Sender:", email.sender);
+            console.log("Subject:", email.subject);
             console.log(
                 "Body length:",
-                email.body
-                    ? email.body.length
-                    : 0
+                email.body ? email.body.length : 0
             );
+            console.log("Body:", email.body);
+            console.log("======================================");
 
-            console.log(
-                "Body:",
-                email.body
-            );
-
-            console.log(
-                "======================================"
-            );
-
-            if (
-                !email.body ||
-                !email.body.trim()
-            ) {
-
+            if (!email.body || !email.body.trim()) {
                 sendResponse({
                     success: false,
-                    error:
-                        "Could not detect an email on this page."
+                    error: "Could not detect an email on this page."
                 });
 
                 return true;
@@ -1763,16 +1215,12 @@ chrome.runtime.onMessage.addListener(
 
             sendResponse({
                 success: true,
-                sender:
-                    email.sender || "",
-                subject:
-                    email.subject || "",
-                body:
-                    email.body || ""
+                sender: email.sender || "",
+                subject: email.subject || "",
+                body: email.body || ""
             });
 
         } catch (error) {
-
             console.error(
                 "[Phishing Detector] Email extraction error:",
                 error
@@ -1780,9 +1228,7 @@ chrome.runtime.onMessage.addListener(
 
             sendResponse({
                 success: false,
-                error:
-                    error.message ||
-                    "Email extraction failed."
+                error: error.message || "Email extraction failed."
             });
         }
 
